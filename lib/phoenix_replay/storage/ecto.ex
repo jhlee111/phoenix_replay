@@ -30,7 +30,7 @@ defmodule PhoenixReplay.Storage.Ecto do
 
   import Ecto.Query, only: [from: 2]
 
-  alias PhoenixReplay.Storage.Ecto.{Event, Feedback}
+  alias PhoenixReplay.Storage.Ecto.Feedback
 
   @impl true
   def start_session(identity, now) do
@@ -43,27 +43,8 @@ defmodule PhoenixReplay.Storage.Ecto do
   end
 
   @impl true
-  def append_events(session_id, seq, batch)
-      when is_binary(session_id) and is_integer(seq) and is_list(batch) do
-    repo = repo!()
-    now = DateTime.utc_now()
-
-    attrs = %{
-      session_id: session_id,
-      seq: seq,
-      batch: batch,
-      inserted_at: now
-    }
-
-    try do
-      case repo.insert_all(Event, [attrs], on_conflict: :nothing,
-             conflict_target: [:session_id, :seq]) do
-        {1, _} -> :ok
-        {0, _} -> {:error, :conflict}
-      end
-    rescue
-      e in Ecto.ConstraintError -> {:error, {:constraint, e}}
-    end
+  def append_events(session_id, seq, batch) do
+    PhoenixReplay.Storage.Events.append(repo!(), session_id, seq, batch)
   end
 
   @impl true
@@ -95,18 +76,8 @@ defmodule PhoenixReplay.Storage.Ecto do
   end
 
   @impl true
-  def fetch_events(session_id) when is_binary(session_id) do
-    repo = repo!()
-
-    rows =
-      from(e in Event,
-        where: e.session_id == ^session_id,
-        order_by: [asc: e.seq],
-        select: e.batch
-      )
-      |> repo.all()
-
-    {:ok, Enum.concat(rows)}
+  def fetch_events(session_id) do
+    PhoenixReplay.Storage.Events.fetch(repo!(), session_id)
   end
 
   @impl true
