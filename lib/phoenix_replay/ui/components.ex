@@ -1,20 +1,97 @@
 defmodule PhoenixReplay.UI.Components do
   @moduledoc """
-  Stateless `Phoenix.Component` functions for embedding feedback UI in
-  a host admin LiveView.
+  Phoenix function components for the PhoenixReplay widget.
 
-    * `feedback_list/1` — paginated table of feedback entries.
-    * `feedback_detail/1` — single-entry detail panel with metadata,
-      console/network tabs, and replay player.
-    * `replay_player/1` — thin wrapper around the `rrweb-player` web
-      component; requires the `player_hook.js` LiveView hook.
+  ## Usage
 
-  Also exposes `phoenix_replay_widget/1` — the floating "Report Issue"
-  button + modal that clients embed in their root layout.
+  Drop the mount + scripts into your root layout once:
 
-  Tailwind-friendly class hooks are exposed via CSS custom properties
-  so hosts can theme the widget without forking the templates.
+      # lib/my_app_web/components/layouts/root.html.heex
+      <.phoenix_replay_widget
+        base_path={~p"/api/feedback"}
+        csrf_token={get_csrf_token()}
+      />
+
+  The widget JS auto-mounts on any element with `data-phoenix-replay`
+  attribute, so no additional glue is required.
+
+  ## Script sources
+
+  PhoenixReplay itself ships `phoenix_replay.js` and
+  `phoenix_replay.css` under `/phoenix_replay/` when served via
+  `Plug.Static`. `rrweb` + its plugins are NOT vendored — pass
+  `rrweb_src`, `rrweb_console_src`, and `rrweb_network_src` to point at
+  your preferred origin (CDN or self-hosted).
+
+  When rrweb is missing the widget still works — descriptions + severity
+  are submitted without DOM/console/network replay.
+
+  The component renders only in environments you explicitly enable
+  (staging / opt-in prod) — control via the host's own config check
+  before rendering.
   """
 
-  # Implementation lands in Phase 3.
+  use Phoenix.Component
+
+  @default_rrweb_src "https://cdn.jsdelivr.net/npm/rrweb@2.0.0-alpha.18/dist/rrweb.min.js"
+  @default_console_src "https://cdn.jsdelivr.net/npm/@rrweb/rrweb-plugin-console-record@2.0.0-alpha.18/dist/rrweb-plugin-console-record.min.js"
+  @default_network_src "https://cdn.jsdelivr.net/npm/@rrweb/rrweb-plugin-network-record@2.0.0-alpha.18/dist/rrweb-plugin-network-record.min.js"
+
+  attr :base_path, :string,
+    required: true,
+    doc:
+      "Path prefix where `feedback_routes/2` is mounted. The widget " <>
+        "will POST to `\#{base_path}/session`, `/events`, and `/submit`."
+
+  attr :csrf_token, :string,
+    required: true,
+    doc: "Phoenix CSRF token. Pass `get_csrf_token()` in your layout."
+
+  attr :widget_text, :string,
+    default: "Report issue",
+    doc: "Label shown on the floating toggle button."
+
+  attr :rrweb_src, :string,
+    default: @default_rrweb_src,
+    doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
+
+  attr :rrweb_console_src, :string,
+    default: @default_console_src,
+    doc: "Script URL for rrweb console plugin. Pass `nil` to disable."
+
+  attr :rrweb_network_src, :string,
+    default: @default_network_src,
+    doc: "Script URL for rrweb network plugin. Pass `nil` to disable."
+
+  attr :asset_path, :string,
+    default: "/phoenix_replay",
+    doc:
+      "Public path prefix where `phoenix_replay.js` / `phoenix_replay.css` " <>
+        "are served. Mount `Plug.Static, at: asset_path, from: {:phoenix_replay, \"priv/static/assets\"}`."
+
+  attr :rest, :global
+
+  @doc """
+  Renders the PhoenixReplay mount point, stylesheet, and scripts.
+
+  Emits a hidden `<div data-phoenix-replay>` with all configuration on
+  data-attributes. The included `phoenix_replay.js` auto-mounts on
+  DOMContentLoaded.
+  """
+  def phoenix_replay_widget(assigns) do
+    ~H"""
+    <link rel="stylesheet" href={"#{@asset_path}/phoenix_replay.css"} />
+    <script :if={@rrweb_src} src={@rrweb_src} crossorigin="anonymous"></script>
+    <script :if={@rrweb_console_src} src={@rrweb_console_src} crossorigin="anonymous"></script>
+    <script :if={@rrweb_network_src} src={@rrweb_network_src} crossorigin="anonymous"></script>
+    <script src={"#{@asset_path}/phoenix_replay.js"} defer></script>
+    <div
+      data-phoenix-replay
+      data-base-path={@base_path}
+      data-csrf-token={@csrf_token}
+      data-widget-text={@widget_text}
+      {@rest}
+    />
+    """
+  end
 end

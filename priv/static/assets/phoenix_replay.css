@@ -1,0 +1,143 @@
+/* PhoenixReplay widget — scoped styles using CSS custom properties so
+ * hosts can theme without forking the template.
+ */
+
+.phx-replay-widget {
+  --phx-replay-primary: #4f46e5;
+  --phx-replay-primary-hover: #4338ca;
+  --phx-replay-surface: #ffffff;
+  --phx-replay-surface-muted: #f8fafc;
+  --phx-replay-border: #e2e8f0;
+  --phx-replay-text: #0f172a;
+  --phx-replay-text-muted: #64748b;
+  --phx-replay-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--phx-replay-text);
+}
+
+.phx-replay-toggle {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--phx-replay-primary);
+  color: #fff;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: var(--phx-replay-shadow);
+}
+
+.phx-replay-toggle:hover {
+  background: var(--phx-replay-primary-hover);
+}
+
+.phx-replay-modal[aria-hidden="true"] {
+  display: none;
+}
+
+.phx-replay-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.phx-replay-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.phx-replay-modal-panel {
+  position: relative;
+  width: min(32rem, 90vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.25rem 1.25rem 1rem;
+  background: var(--phx-replay-surface);
+  border-radius: 0.75rem;
+  box-shadow: var(--phx-replay-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.phx-replay-modal-panel h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.phx-replay-modal-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--phx-replay-text-muted);
+}
+
+.phx-replay-modal-panel textarea,
+.phx-replay-modal-panel select,
+.phx-replay-modal-panel input[type="url"] {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 0.5rem;
+  font: inherit;
+  color: var(--phx-replay-text);
+  background: var(--phx-replay-surface-muted);
+}
+
+.phx-replay-modal-panel textarea:focus,
+.phx-replay-modal-panel select:focus,
+.phx-replay-modal-panel input:focus {
+  outline: 2px solid var(--phx-replay-primary);
+  outline-offset: 1px;
+}
+
+.phx-replay-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.phx-replay-cancel,
+.phx-replay-submit {
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.phx-replay-cancel {
+  background: var(--phx-replay-surface-muted);
+  color: var(--phx-replay-text);
+  border-color: var(--phx-replay-border);
+}
+
+.phx-replay-submit {
+  background: var(--phx-replay-primary);
+  color: #fff;
+}
+
+.phx-replay-submit:hover {
+  background: var(--phx-replay-primary-hover);
+}
+
+.phx-replay-status {
+  font-size: 0.8125rem;
+  color: var(--phx-replay-text-muted);
+  min-height: 1.25rem;
+}

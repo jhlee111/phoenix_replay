@@ -20,12 +20,40 @@ marginal cost.
 
 ## Status
 
-- [ ] Phase 0 — Repo scaffold + API freeze
-- [ ] Phase 1 — Capture client JS (rrweb + widget + session token)
+- [x] Phase 0 — Repo scaffold + API freeze
+- [x] Phase 1 — Capture client JS (rrweb + widget + session token handshake)
 - [ ] Phase 2 — Ingest controllers + Ecto storage
 - [ ] Phase 3 — Admin UI components + rrweb-player LV hook
 - [ ] Phase 4 — Ash companion (`ash_feedback`)
 - [ ] Phase 5 — Hex publish
+
+### How to mount the widget (Phase 1)
+
+```elixir
+# lib/my_app_web/endpoint.ex — serve the widget assets
+plug Plug.Static,
+  at: "/phoenix_replay",
+  from: {:phoenix_replay, "priv/static/assets"},
+  gzip: false
+```
+
+```heex
+# lib/my_app_web/components/layouts/root.html.heex
+<.phoenix_replay_widget
+  base_path={~p"/api/feedback"}
+  csrf_token={get_csrf_token()}
+/>
+```
+
+`rrweb` is loaded from a CDN by default (`jsdelivr`). Override with
+`rrweb_src={...}` to self-host, or `rrweb_src={nil}` to disable replay
+(description + severity still submit).
+
+The widget auto-mounts on DOMContentLoaded — no JS glue required.
+
+> Transport endpoints (`/session`, `/events`, `/submit`) land in Phase 2.
+> The widget currently renders and handshakes against stubs that return
+> 501 Not Implemented.
 
 ## Companion packages
 
