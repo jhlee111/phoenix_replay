@@ -1,0 +1,201 @@
+/*
+ * PhoenixReplay admin styles — scoped to `.phx-replay-*` selectors.
+ * Uses CSS custom properties so hosts can theme via a wrapping
+ * `:root` / container override without forking the file.
+ */
+:root {
+  --phx-replay-bg: #ffffff;
+  --phx-replay-border: #e2e8f0;
+  --phx-replay-muted: #64748b;
+  --phx-replay-selected: #eff6ff;
+  --phx-replay-severity-info: #0ea5e9;
+  --phx-replay-severity-low: #22c55e;
+  --phx-replay-severity-medium: #eab308;
+  --phx-replay-severity-high: #f97316;
+  --phx-replay-severity-critical: #ef4444;
+  --phx-replay-severity-none: #94a3b8;
+}
+
+.phx-replay-list {
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 8px;
+  background: var(--phx-replay-bg);
+  overflow: hidden;
+}
+
+.phx-replay-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--phx-replay-muted);
+  font-size: 0.9rem;
+}
+
+.phx-replay-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.phx-replay-list-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid var(--phx-replay-border);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.phx-replay-list-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--phx-replay-border);
+  transition: background-color 0.1s ease;
+}
+
+.phx-replay-list-row:hover {
+  background: #f8fafc;
+}
+
+.phx-replay-list-row.is-selected {
+  background: var(--phx-replay-selected);
+}
+
+.phx-replay-list-row td {
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+}
+
+.phx-replay-col-when {
+  white-space: nowrap;
+  color: var(--phx-replay-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.phx-replay-col-who {
+  color: var(--phx-replay-muted);
+  font-size: 0.8rem;
+}
+
+.phx-replay-col-desc {
+  color: #0f172a;
+}
+
+.phx-replay-severity {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fff;
+  background: var(--phx-replay-severity-none);
+}
+
+.phx-replay-severity.severity-info { background: var(--phx-replay-severity-info); }
+.phx-replay-severity.severity-low { background: var(--phx-replay-severity-low); }
+.phx-replay-severity.severity-medium { background: var(--phx-replay-severity-medium); color: #1f2937; }
+.phx-replay-severity.severity-high { background: var(--phx-replay-severity-high); }
+.phx-replay-severity.severity-critical { background: var(--phx-replay-severity-critical); }
+
+/* Detail view */
+.phx-replay-detail {
+  background: var(--phx-replay-bg);
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  font-size: 0.875rem;
+}
+
+.phx-replay-detail-header {
+  border-bottom: 1px solid var(--phx-replay-border);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.phx-replay-detail-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.phx-replay-detail-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--phx-replay-muted);
+}
+
+.phx-replay-detail-meta dt {
+  font-weight: 600;
+}
+
+.phx-replay-detail-meta dd {
+  margin: 0;
+  color: #334155;
+}
+
+.phx-replay-detail-body h3,
+.phx-replay-detail-meta-section h3,
+.phx-replay-detail-player-section h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--phx-replay-muted);
+  margin: 1rem 0 0.5rem;
+}
+
+.phx-replay-description {
+  background: #f8fafc;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.phx-replay-metadata {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.phx-replay-metadata dt {
+  font-weight: 600;
+  color: var(--phx-replay-muted);
+}
+
+.phx-replay-metadata dd {
+  margin: 0;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.phx-replay-metadata code {
+  background: #f1f5f9;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+
+/* Player mount point */
+.phx-replay-player {
+  margin-top: 0.5rem;
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 6px;
+  min-height: 400px;
+  background: #0b1220;
+  overflow: hidden;
+}

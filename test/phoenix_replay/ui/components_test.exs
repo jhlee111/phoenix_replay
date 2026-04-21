@@ -4,6 +4,93 @@ defmodule PhoenixReplay.UI.ComponentsTest do
   import Phoenix.LiveViewTest
   import PhoenixReplay.UI.Components
 
+  describe "admin components" do
+    test "phoenix_replay_admin_assets emits stylesheets + player hook" do
+      html = render_component(&phoenix_replay_admin_assets/1, [])
+
+      assert html =~ "phoenix_replay_admin.css"
+      assert html =~ "player_hook.js"
+      assert html =~ "rrweb-player@"
+    end
+
+    test "phoenix_replay_admin_assets can disable player assets" do
+      html =
+        render_component(&phoenix_replay_admin_assets/1, player_src: nil, player_style_src: nil)
+
+      refute html =~ "rrweb-player"
+      assert html =~ "player_hook.js"
+    end
+
+    test "feedback_list renders empty state when entries is []" do
+      html = render_component(&feedback_list/1, entries: [])
+      assert html =~ "No feedback yet"
+    end
+
+    test "feedback_list renders one row per entry with click bindings" do
+      entries = [
+        %{
+          id: "fbk_1",
+          severity: "high",
+          description: "broken",
+          session_id: "sess_x",
+          identity: %{"kind" => "user", "id" => "u1", "attrs" => %{"email" => "a@b.com"}},
+          inserted_at: ~U[2026-04-21 04:15:00Z]
+        }
+      ]
+
+      html = render_component(&feedback_list/1, entries: entries)
+      assert html =~ "broken"
+      assert html =~ "a@b.com"
+      assert html =~ ~s(phx-click="select_feedback")
+      assert html =~ ~s(phx-value-id="fbk_1")
+      assert html =~ "severity-high"
+    end
+
+    test "feedback_detail shows description, metadata, and replay player" do
+      entry = %{
+        id: "fbk_1",
+        severity: "low",
+        description: "something off",
+        session_id: "sess_abc",
+        identity: %{"kind" => "user", "id" => "u", "attrs" => %{"email" => "x@y"}},
+        metadata: %{"interface" => "admin", "user_agent" => "curl"},
+        inserted_at: ~U[2026-04-21 04:15:00Z]
+      }
+
+      html =
+        render_component(&feedback_detail/1,
+          entry: entry,
+          events_url: "/admin/feedback/events/sess_abc"
+        )
+
+      assert html =~ "something off"
+      assert html =~ "admin"
+      assert html =~ "curl"
+      assert html =~ "data-phoenix-replay-player"
+      assert html =~ "data-events-url=\"/admin/feedback/events/sess_abc\""
+    end
+
+    test "feedback_detail hides the player when hide_player is true" do
+      entry = %{id: "x", description: "d", metadata: %{}, identity: %{}}
+
+      html =
+        render_component(&feedback_detail/1,
+          entry: entry,
+          events_url: "/x",
+          hide_player: true
+        )
+
+      refute html =~ "data-phoenix-replay-player"
+    end
+
+    test "replay_player emits mount div with events_url" do
+      html = render_component(&replay_player/1, events_url: "/admin/feedback/events/abc")
+      assert html =~ "data-phoenix-replay-player"
+      assert html =~ "data-events-url=\"/admin/feedback/events/abc\""
+      assert html =~ ~s(phx-update="ignore")
+    end
+  end
+
   describe "phoenix_replay_widget/1" do
     test "renders mount div with required data attributes" do
       html =
