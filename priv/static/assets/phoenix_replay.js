@@ -33,7 +33,10 @@
 
   // ---- transport ---------------------------------------------------------
 
-  async function postJson(url, body, { csrfToken, sessionToken, tokenHeader, csrfHeader, gzip = true }) {
+  async function postJson(url, body, { csrfToken, sessionToken, tokenHeader, csrfHeader, gzip = false }) {
+    // gzip default is off: Phoenix's default JSON body parser does not
+    // handle `content-encoding: gzip`. Hosts that install a gzip-aware
+    // body reader can pass `gzip: true` at init time. Revisit in Phase 3+.
     const headers = { "content-type": "application/json" };
     if (csrfToken) headers[csrfHeader] = csrfToken;
     if (sessionToken) headers[tokenHeader] = sessionToken;

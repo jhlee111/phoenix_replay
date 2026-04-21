@@ -35,6 +35,8 @@ defmodule PhoenixReplay.Router do
   defmacro feedback_routes(path, opts \\ []) do
     quote bind_quoted: [path: path, opts: opts] do
       scope path, PhoenixReplay do
+        pipe_through [PhoenixReplay.Plug.Identify]
+
         post "/session", SessionController, :create
         post "/events", EventsController, :append
         post "/submit", SubmitController, :create
