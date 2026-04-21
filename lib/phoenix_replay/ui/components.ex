@@ -33,9 +33,16 @@ defmodule PhoenixReplay.UI.Components do
 
   use Phoenix.Component
 
-  @default_rrweb_src "https://cdn.jsdelivr.net/npm/rrweb@2.0.0-alpha.18/dist/rrweb.min.js"
-  @default_console_src "https://cdn.jsdelivr.net/npm/@rrweb/rrweb-plugin-console-record@2.0.0-alpha.18/dist/rrweb-plugin-console-record.min.js"
-  @default_network_src "https://cdn.jsdelivr.net/npm/@rrweb/rrweb-plugin-network-record@2.0.0-alpha.18/dist/rrweb-plugin-network-record.min.js"
+  @rrweb_version "2.0.0-alpha.18"
+  # Use unpkg: it serves `.umd.cjs` with `text/javascript`. jsdelivr labels
+  # the same file as `application/node`, which Chrome's strict MIME check
+  # refuses to execute as a script. Hosts can override either URL.
+  @default_rrweb_src "https://unpkg.com/rrweb@#{@rrweb_version}/dist/rrweb.umd.cjs"
+  @default_console_src "https://unpkg.com/@rrweb/rrweb-plugin-console-record@#{@rrweb_version}/dist/rrweb-plugin-console-record.umd.cjs"
+  # Network plugin is not published as a separate npm package at this rrweb
+  # version — hosts that want network capture can build it themselves and
+  # pass the URL via `rrweb_network_src`.
+  @default_network_src nil
 
   attr :base_path, :string,
     required: true,

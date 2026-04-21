@@ -90,12 +90,19 @@
       return { stop: () => {} };
     }
 
+    // rrweb@2.0 UMD plugins expose themselves under camel-cased package
+    // names (rrwebPluginConsoleRecord, rrwebPluginNetworkRecord). Keep the
+    // older rrwebConsoleRecord / rrwebNetworkRecord names as fallbacks in
+    // case a host ships them under different bundling.
+    const consolePlugin = global.rrwebPluginConsoleRecord || global.rrwebConsoleRecord;
+    const networkPlugin = global.rrwebPluginNetworkRecord || global.rrwebNetworkRecord;
+
     const plugins = [];
-    if (global.rrwebConsoleRecord?.getRecordConsolePlugin) {
-      plugins.push(global.rrwebConsoleRecord.getRecordConsolePlugin({ lengthThreshold: 100, level: ["error", "warn", "log", "info"] }));
+    if (consolePlugin?.getRecordConsolePlugin) {
+      plugins.push(consolePlugin.getRecordConsolePlugin({ lengthThreshold: 100, level: ["error", "warn", "log", "info"] }));
     }
-    if (global.rrwebNetworkRecord?.getRecordNetworkPlugin) {
-      plugins.push(global.rrwebNetworkRecord.getRecordNetworkPlugin({ initiatorTypes: ["fetch", "xmlhttprequest"] }));
+    if (networkPlugin?.getRecordNetworkPlugin) {
+      plugins.push(networkPlugin.getRecordNetworkPlugin({ initiatorTypes: ["fetch", "xmlhttprequest"] }));
     }
 
     const stop = global.rrweb.record({

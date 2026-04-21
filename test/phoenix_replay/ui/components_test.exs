@@ -29,16 +29,29 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(src="/phoenix_replay/phoenix_replay.js")
     end
 
-    test "includes rrweb + plugin scripts by default (CDN)" do
+    test "includes rrweb + console plugin scripts by default (CDN)" do
       html =
         render_component(&phoenix_replay_widget/1,
           base_path: "/x",
           csrf_token: "x"
         )
 
-      assert html =~ "rrweb@2.0.0-alpha.18/dist/rrweb.min.js"
+      assert html =~ "unpkg.com/rrweb@2.0.0-alpha.18/dist/rrweb.umd.cjs"
       assert html =~ "rrweb-plugin-console-record"
-      assert html =~ "rrweb-plugin-network-record"
+      # Network plugin is not shipped as a default — no separate npm package
+      # at this rrweb version. Hosts can opt in via `rrweb_network_src`.
+      refute html =~ "rrweb-plugin-network-record"
+    end
+
+    test "network plugin script emitted when rrweb_network_src is passed" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          rrweb_network_src: "/assets/my-network-plugin.js"
+        )
+
+      assert html =~ ~s(src="/assets/my-network-plugin.js")
     end
 
     test "rrweb scripts can be disabled by passing nil sources" do
