@@ -248,6 +248,11 @@ Patterns are Regex; first match wins and replaces with `"***REDACTED***"`.
 **Gotcha**: setting either key replaces the library defaults. Re-declare
 the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 
+## Docs
+
+- [`docs/plans/README.md`](docs/plans/README.md) — forward-looking
+  plan index (5f / 6)
+
 ## Status
 
 - [x] Phase 0 — Repo scaffold + API freeze
@@ -255,7 +260,8 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 - [x] Phase 2 — Ingest controllers + Ecto storage adapter
 - [x] Phase 3 — Admin UI components + rrweb-player LV hook
 - [x] Phase 4 — Ash companion (`ash_feedback`)
-- [ ] Phase 5 — Hex publish (PoC hardening first)
+- [ ] [Phase 5f](docs/plans/5f-igniter-installer.md) — Igniter installer (`mix phoenix_replay.install`)
+- [ ] Phase 6 — Hex publish (PoC hardening first)
 
 ## Companion packages
 
