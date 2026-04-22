@@ -45,9 +45,15 @@ marginal cost.
 ```
 
 Events (rrweb frames) always land on raw Ecto — high-volume, append-only,
-JSONB. Feedback rows can optionally route through Ash if you install
-[`ash_feedback`](https://github.com/jhlee111/ash_feedback) — you get
-policies, PaperTrail, AshPrefixedId, and a triage state machine.
+JSONB. Feedback rows can optionally be persisted as an Ash resource if
+you install [`ash_feedback`](https://github.com/jhlee111/ash_feedback) —
+you get policies, PaperTrail, AshPrefixedId, and a triage state machine
+baked into the Feedback resource.
+
+> Not to be confused with
+> [`ash_storage`](https://github.com/ash-project/ash_storage) — that's
+> an official Ash extension for **file attachments** (images, PDFs).
+> `ash_feedback` is about the Feedback row itself, not file uploads.
 
 ## Requirements
 
@@ -110,7 +116,7 @@ config :phoenix_replay,
 | `environment` | Tagged on every batch. Used by the triage UI to distinguish `:dev` / `:staging` / `:preview` / `:prod`. |
 | `identify` | `{M, F, A}` — returns `%{kind: atom, id: String, attrs: map}` or `nil` (401). Only authed users may open a session. |
 | `metadata` | `{M, F, A}` — server-side enrichment merged into each submitted feedback (`environment`, `user_agent`, `remote_ip`, etc.). |
-| `storage` | `{module, opts}` implementing `PhoenixReplay.Storage`. Bundled: `PhoenixReplay.Storage.Ecto`. Ash: `AshFeedback.Storage`. |
+| `storage` | `{module, opts}` implementing the `PhoenixReplay.Storage` behaviour (the write path for feedback + events). Bundled: `PhoenixReplay.Storage.Ecto` (raw Ecto). For an Ash-native Feedback resource with triage + PaperTrail + policies, use `{AshFeedback.Storage, resource: ..., repo: ...}` from [`ash_feedback`](https://github.com/jhlee111/ash_feedback). |
 | `session_token_secret` | HMAC secret for session tokens. ≥32 bytes. Rotate per environment. |
 | `limits` | `max_batch_bytes` — single POST cap. Complex admin pages can emit >1MB FullSnapshots; 5MB is a safe dev default. |
 | `scrub` | PII rules applied BEFORE storage. Setting `console:` or `query_deny_list:` **replaces** defaults, so re-declare the baseline patterns plus your host-specific ones. |
@@ -254,9 +260,11 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 ## Companion packages
 
 - [`ash_feedback`](https://github.com/jhlee111/ash_feedback) — Ash
-  adapter. Gives Ash users idiomatic resources, policies,
-  `AshPrefixedId`, `AshPaperTrail`, and a triage state machine
+  resource for the Feedback row, with policies, `AshPrefixedId`,
+  `AshPaperTrail`, PubSub, and a triage state machine
   (new → acknowledged → in_progress → verified_on_preview → resolved).
+  Ships a thin `PhoenixReplay.Storage` implementation that routes
+  `POST /submit` through the Ash domain.
 
 ## License
 
