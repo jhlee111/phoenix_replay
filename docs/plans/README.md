@@ -2,11 +2,8 @@
 
 Forward-looking work plans. Completed phases are in
 [`../../README.md`](../../README.md) under **Status** and live in git
-history.
-
-Originating cross-cutting plan (covers both libraries + gs_net host):
-[gs_net/docs/plans/active/2026-04-21-feedback-triage.md](
-https://github.com/jhlee111/gs-net/blob/main/docs/plans/active/2026-04-21-feedback-triage.md).
+history. Newer plans live under `active/`, `backlog/`, `proposals/`,
+`completed/` — legacy phase files remain flat until re-filed.
 
 ## Index
 
