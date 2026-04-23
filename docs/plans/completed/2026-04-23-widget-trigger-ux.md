@@ -203,7 +203,12 @@ Rollback: `git revert` each phase's commits. No migrations, no storage touches. 
 
 ## Follow-ups (separate plans/ADRs)
 
-- **ADR-0002 candidate**: on-demand recording mode (Jam-style "start reproduction")
-- **ADR-0003 candidate**: microphone narration
+- **phoenix_replay ADR-0002 candidate**: on-demand recording mode
+  (Jam-style "start reproduction")
+- **ash_feedback ADR candidate**: microphone narration. Originally
+  considered a phoenix_replay concern; re-scoped to ash_feedback on
+  2026-04-23 — audio is a feedback-artifact feature (storage / paper
+  trail / policy / audit) and rides on top of the existing headless
+  API shipped in this plan, so phoenix_replay needs no changes.
 - **Plan**: JS test infrastructure if surface keeps growing
 - **Plan**: panel state events (`replay:opened` / `replay:closed`) if a consumer requests
