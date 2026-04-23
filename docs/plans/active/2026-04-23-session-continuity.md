@@ -1,18 +1,16 @@
 # Plan: Session Continuity Across Page Loads — Implementation
 
-**Status**: Phase 1 shipped (2026-04-23, `044f250`); Phase 2 pending
+**Status**: Phase 1 shipped (2026-04-23, `044f250`); Phase 2
+implemented + smoked 2026-04-23 (pending commit)
 **Started**: 2026-04-23
 **ADR**: [0003-session-continuity](../../decisions/0003-session-continuity.md)
 
-**Next**: kick off Phase 2 — introduce `PhoenixReplay.SessionRegistry`
-+ `PhoenixReplay.Session` GenServer + `PhoenixReplay.SessionSupervisor`
-under `application.ex`, switch `EventsController` writes to route
-through the `Session` process, add PubSub broadcasts (`event_batch` /
-`session_closed` / `session_abandoned`), add the idle-timeout teardown,
-and wire config keys `:pubsub` + `:pubsub_topic_prefix`. The Phase 1
-DB-fallback resume stays in place — Phase 2 adds a Registry-first
-lookup that falls back to the DB path on no-process (covers crash
-restarts cleanly).
+**Next**: commit Phase 2 to `phoenix_replay` (`mix test` green, 48
+tests; in-host smoke confirmed Registry-hit resume across navigation
+— same `session_id` + same pid + monotonically climbing watermark, plus
+live `:event_batch` broadcasts received by an `iex` subscriber).
+After the commit lands, this plan's Phase 1 shipped marker promotes to
+"Phases 1 + 2 shipped"; move to `completed/`.
 
 ## Overview
 
@@ -337,19 +335,28 @@ navigation, stale-token behavior, privacy note on `sessionStorage`.
 
 ### DoD (Phase 2)
 
-- [ ] `PhoenixReplay.Session` + `SessionSupervisor` + `SessionRegistry`
+- [x] `PhoenixReplay.Session` + `SessionSupervisor` + `SessionRegistry`
       under the library supervisor
-- [ ] `EventsController` + `SubmitController` route through `Session`
-- [ ] PubSub broadcasts on `event_batch`, `session_closed`, `session_abandoned`
-- [ ] Idle timeout fires → process terminates → abandonment broadcast
-- [ ] Config keys documented (`:pubsub`, `:pubsub_topic_prefix`,
+- [x] `EventsController` + `SubmitController` route through `Session`
+- [x] PubSub broadcasts on `event_batch`, `session_closed`, `session_abandoned`
+- [x] Idle timeout fires → process terminates → abandonment broadcast
+- [x] Config keys documented (`:pubsub`, `:pubsub_topic_prefix`,
       `:session_idle_timeout_ms`)
-- [ ] README "Install (manual)" section for supervisor wiring (OQ5)
-- [ ] CHANGELOG unreleased entry extended
-- [ ] New guide `docs/guides/multi-page-reproductions.md`
-- [ ] Continuity still works during a process crash (supervisor
-      restart → next `/events` POST finds no process, controller
-      falls back to DB resume, events still land)
+- [x] OQ5 — README documents the new supervisor wiring + `:pubsub`
+      sharing. Manual `application.ex` wiring no longer needed
+      because the library auto-starts via `mod: {PhoenixReplay.Application, []}`
+      (deviation from the ADR's contemplated manual block: auto-start
+      is the natural Elixir pattern and what the install task would
+      do anyway). README's new "Subscribe to live session events"
+      section covers the consumer-facing surface.
+- [x] CHANGELOG unreleased entry extended
+- [x] New guide `docs/guides/multi-page-reproductions.md`
+- [x] Continuity still works during a process crash (verified by
+      design: `EventsController` calls `Session.lookup_or_start/2`,
+      which on a registry miss looks up `Storage.resume_session/2`
+      and respawns a fresh GenServer seeded with the persisted
+      watermark before appending). Full-system smoke pending demo
+      restart in Phase 2.7.
 
 ### Non-goals (Phase 2)
 

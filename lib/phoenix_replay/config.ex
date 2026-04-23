@@ -46,6 +46,17 @@ defmodule PhoenixReplay.Config do
       Default: 900_000 (15 minutes). See ADR-0003 OQ2. Hosts running
       long manual reproduction workflows can widen this.
 
+    * `:pubsub` — atom naming the host's `Phoenix.PubSub` instance.
+      `PhoenixReplay.Session` broadcasts `:event_batch`,
+      `:session_closed`, and `:session_abandoned` messages on this
+      bus so live admin views can subscribe. When unset, the library
+      starts its own `PhoenixReplay.PubSub` under its supervisor
+      (zero-config; small process overhead). ADR-0003 OQ4.
+
+    * `:pubsub_topic_prefix` — string prepended to every Session
+      topic. Default: `"phoenix_replay"`. Topics resolve to
+      `"\#{prefix}:session:\#{session_id}"`.
+
   ## Example
 
       config :phoenix_replay,
@@ -79,6 +90,12 @@ defmodule PhoenixReplay.Config do
 
   @doc false
   def session_idle_timeout_ms, do: fetch(:session_idle_timeout_ms, 900_000)
+
+  @doc false
+  def pubsub, do: fetch(:pubsub, PhoenixReplay.PubSub)
+
+  @doc false
+  def pubsub_topic_prefix, do: fetch(:pubsub_topic_prefix, "phoenix_replay")
 
   @doc false
   def empty_map(_conn), do: %{}

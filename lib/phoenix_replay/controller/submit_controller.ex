@@ -7,7 +7,7 @@ defmodule PhoenixReplay.SubmitController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{Hook, SessionToken, Storage}
+  alias PhoenixReplay.{Hook, Session, SessionToken, Storage}
   alias PhoenixReplay.Plug.Identify
 
   @token_header "x-phoenix-replay-session"
@@ -34,6 +34,10 @@ defmodule PhoenixReplay.SubmitController do
 
       case Storage.Dispatch.submit(session_id, submit_params, identity) do
         {:ok, feedback} ->
+          # Best-effort close — if the Session process already exited
+          # (idle timeout, crash), the broadcast is skipped silently.
+          _ = Session.close(session_id, :submitted)
+
           conn
           |> put_status(:created)
           |> json(%{ok: true, id: fetch_id(feedback)})

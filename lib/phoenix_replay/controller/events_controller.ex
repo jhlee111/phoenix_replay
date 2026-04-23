@@ -6,7 +6,7 @@ defmodule PhoenixReplay.EventsController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{Config, RateLimiter, Scrub, SessionToken, Storage}
+  alias PhoenixReplay.{Config, RateLimiter, Scrub, Session, SessionToken}
   alias PhoenixReplay.Plug.Identify
 
   @token_header "x-phoenix-replay-session"
@@ -29,9 +29,12 @@ defmodule PhoenixReplay.EventsController do
          {:ok, seq, batch} <- parse_payload(params) do
       scrubbed = Scrub.scrub_batch(batch)
 
-      case Storage.Dispatch.append_events(session_id, seq, scrubbed) do
-        :ok -> json(conn, %{ok: true, seq: seq})
+      with {:ok, _pid} <- Session.lookup_or_start(session_id, identity),
+           :ok <- Session.append_events(session_id, seq, scrubbed) do
+        json(conn, %{ok: true, seq: seq})
+      else
         {:error, :conflict} -> send_error(conn, 409, "seq_conflict")
+        {:error, :no_session} -> send_error(conn, 410, "session_expired")
         {:error, other} -> send_error(conn, 500, "append_failed", inspect(other))
       end
     else

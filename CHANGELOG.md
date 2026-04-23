@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Session continuity across page loads — Phase 2 (ADR-0003). Adds the
+  server-side per-session GenServer layer that Phase 1 deferred:
+  `PhoenixReplay.Session` (one process per `session_id`, registered
+  under `PhoenixReplay.SessionRegistry`, supervised by
+  `PhoenixReplay.SessionSupervisor`). Holds in-memory `seq_watermark`,
+  a bounded queue of recent seqs for in-flight dedup, and an
+  idle-timer. `EventsController` and `SubmitController` now route
+  through this process (with a lookup-or-start fallback that re-seeds
+  state from the DB after a crash). `SessionController` resume now
+  checks the registry first and falls back to the Phase 1 DB path —
+  zero behavior change for cold starts.
+- PubSub broadcasts on the new bus
+  `"\#{prefix}:session:\#{session_id}"`:
+  * `{:event_batch, session_id, events, seq}` after every accepted
+    `POST /events`
+  * `{:session_closed, session_id, reason}` on `Session.close/2`
+    (called from `POST /submit` with reason `:submitted`)
+  * `{:session_abandoned, session_id, last_event_at}` when the idle
+    timer expires
+  Live admin LiveViews can subscribe to stream rrweb frames or render
+  abandonment without polling. Topic prefix configurable via
+  `:pubsub_topic_prefix`.
+- `:pubsub` config key — atom naming the host's `Phoenix.PubSub`
+  instance. When unset, the library starts its own
+  `PhoenixReplay.PubSub` under its supervisor (zero-config; one extra
+  process). ADR-0003 OQ4.
+- `:pubsub_topic_prefix` config key — string prepended to every
+  Session topic. Default `"phoenix_replay"`. ADR-0003 OQ4.
+- `Session.lookup_or_start/2` — idempotent helper used by the events
+  ingest path to spawn a Session on first contact (fresh sessions or
+  crash-restart recovery).
+- README "Subscribe to live session events (optional)" section, new
+  `docs/guides/multi-page-reproductions.md` guide, three new rows in
+  the config-keys table (`:session_idle_timeout_ms`, `:pubsub`,
+  `:pubsub_topic_prefix`).
+- 10 new unit tests for `PhoenixReplay.Session` (append + dedup +
+  watermark + close + idle teardown + lookup_or_start), backed by an
+  in-memory `PhoenixReplay.Storage.TestAdapter` under `test/support`.
 - Session continuity across page loads — Phase 1 (ADR-0003).
   Recordings now survive `<a href>` navigations, form posts, LV↔dead-view
   transitions, and reloads. Client caches the session token in

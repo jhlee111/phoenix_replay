@@ -120,6 +120,9 @@ config :phoenix_replay,
 | `session_token_secret` | HMAC secret for session tokens. ≥32 bytes. Rotate per environment. |
 | `limits` | `max_batch_bytes` — single POST cap. Complex admin pages can emit >1MB FullSnapshots; 5MB is a safe dev default. |
 | `scrub` | PII rules applied BEFORE storage. Setting `console:` or `query_deny_list:` **replaces** defaults, so re-declare the baseline patterns plus your host-specific ones. |
+| `session_idle_timeout_ms` | Default `900_000` (15 min). After this much inactivity, a session can no longer be resumed across page loads and the per-session GenServer broadcasts `:session_abandoned` and exits. |
+| `pubsub` | Optional. Atom naming the host's `Phoenix.PubSub` instance. When set, `PhoenixReplay.Session` broadcasts ride that bus (live admin views can subscribe). When unset, the library starts its own `PhoenixReplay.PubSub` — zero-config but burns one extra process. |
+| `pubsub_topic_prefix` | Default `"phoenix_replay"`. Topics resolve to `"\#{prefix}:session:\#{session_id}"`. Bump only if you have a name collision. |
 
 ### 2. Router
 
@@ -333,7 +336,42 @@ defmodule MyApp.Feedback.Identify do
 end
 ```
 
-### 6. Build your admin UI
+### 6. Subscribe to live session events (optional)
+
+Each in-flight session is owned by a `PhoenixReplay.Session` GenServer
+(supervised by `PhoenixReplay.SessionSupervisor`, registered under
+`PhoenixReplay.SessionRegistry`). It broadcasts on
+`"\#{prefix}:session:\#{session_id}"`:
+
+- `{:event_batch, session_id, events, seq}` — after a successful
+  `POST /events`
+- `{:session_closed, session_id, reason}` — `POST /submit` (or any
+  manual `Session.close/2` call)
+- `{:session_abandoned, session_id, last_event_at}` — idle timeout
+  fired without a `close/2`
+
+A live admin LiveView can subscribe and stream rrweb frames into
+`rrweb-player` as they land, or render a "session abandoned" timeline
+without polling:
+
+```elixir
+@impl true
+def mount(%{"id" => session_id}, _session, socket) do
+  if connected?(socket) do
+    Phoenix.PubSub.subscribe(MyApp.PubSub, "phoenix_replay:session:\#{session_id}")
+  end
+  ...
+end
+
+def handle_info({:event_batch, _session_id, events, _seq}, socket), do: ...
+def handle_info({:session_closed, _, _}, socket), do: ...
+def handle_info({:session_abandoned, _, _}, socket), do: ...
+```
+
+Point the library at your existing PubSub via `config :phoenix_replay,
+:pubsub, MyApp.PubSub` so subscribers and broadcasters share one bus.
+
+### 7. Build your admin UI
 
 The library ships the JSON endpoints + the `rrweb-player` LiveView hook.
 You bring the listing/detail LVs. For a Cinder + Ash-native triage UI,
