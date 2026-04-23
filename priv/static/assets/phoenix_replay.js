@@ -82,6 +82,59 @@
     }
   }
 
+  // Raised when the client tries to resume a session (via the
+  // sessionStorage-cached token) but the server responds
+  // `resumed: false` — the previous session is stale. For
+  // `:continuous` the client recovers silently; for `:on_demand`
+  // this surfaces as the panel error screen because losing the
+  // chain violates explicit consent.
+  class PhoenixReplaySessionInterruptedError extends Error {
+    constructor() {
+      super("Previous recording was interrupted");
+      this.name = "PhoenixReplaySessionInterruptedError";
+    }
+  }
+
+  // `sessionStorage` is tab-local, survives reloads + same-tab
+  // navigations, gone on tab close. Matches ADR-0002 OQ4's tab-local
+  // on-demand scope — and is the right lifetime for a recording
+  // session that should never bleed between tabs.
+  const STORAGE_KEYS = {
+    TOKEN: "phx_replay_token",
+    RECORDING: "phx_replay_recording",
+  };
+
+  function hasStorage() {
+    try {
+      return typeof window !== "undefined" && !!window.sessionStorage;
+    } catch {
+      return false;
+    }
+  }
+
+  function storageRead(key) {
+    if (!hasStorage()) return null;
+    try { return window.sessionStorage.getItem(key); } catch { return null; }
+  }
+
+  function storageWrite(key, value) {
+    if (!hasStorage()) return;
+    try { window.sessionStorage.setItem(key, value); } catch {
+      // QuotaExceededError, Safari private mode, etc. — continuity
+      // silently degrades to per-page behavior. One-time warn so it
+      // doesn't spam the console on every flush.
+      if (!storageWrite._warned) {
+        storageWrite._warned = true;
+        console.warn("[PhoenixReplay] sessionStorage write failed; session continuity disabled for this tab");
+      }
+    }
+  }
+
+  function storageClear(key) {
+    if (!hasStorage()) return;
+    try { window.sessionStorage.removeItem(key); } catch {}
+  }
+
   // ---- ring buffer -------------------------------------------------------
 
   function createRingBuffer(max) {
@@ -152,20 +205,49 @@
     let recorder = null;
     let recording = false;
 
-    // Idempotent: a no-op when a session token is already held. On-demand
-    // mode leans on this — the session handshake waits until the user
-    // clicks Start (via startRecording), not widget mount.
+    // Idempotent: a no-op when a session token is already held.
+    // On-demand mode leans on this — the session handshake waits
+    // until the user clicks Start (via startRecording), not widget
+    // mount.
+    //
+    // If a prior token is cached in `sessionStorage`, sends it in
+    // the resume header. Server response includes `resumed` +
+    // `seq_watermark`:
+    //   - resumed true  → adopt, continue numbering from watermark
+    //   - resumed false AND we sent a stored token → stale path
+    //     (ADR-0003 OQ1): continuous silently overwrites; on-demand
+    //     throws `PhoenixReplaySessionInterruptedError` so the panel
+    //     can render the error screen and force re-consent.
     async function ensureSession() {
       if (sessionToken) return;
+      const stored = storageRead(STORAGE_KEYS.TOKEN);
       const res = await postJson(`${basePath}${cfg.sessionPath}`, {}, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
+        sessionToken: stored,
         tokenHeader: cfg.tokenHeader,
         gzip: false,
       });
-      sessionToken = res?.token;
-      if (!sessionToken) throw new Error("PhoenixReplay: server did not return a session token");
-      seq = 0;
+      const freshToken = res?.token;
+      if (!freshToken) throw new Error("PhoenixReplay: server did not return a session token");
+
+      const sentResumeAttempt = !!stored;
+      const resumed = sentResumeAttempt && res.resumed === true;
+      const interrupted = sentResumeAttempt && res.resumed !== true;
+
+      if (interrupted && cfg.recording === "on_demand") {
+        // Don't silently adopt the server-minted fresh token — the
+        // user's consent was for the previous session. Drop the new
+        // session too (the server will abandon it on idle); let the
+        // panel surface the interruption and wait for Retry.
+        storageClear(STORAGE_KEYS.TOKEN);
+        storageClear(STORAGE_KEYS.RECORDING);
+        throw new PhoenixReplaySessionInterruptedError();
+      }
+
+      sessionToken = freshToken;
+      storageWrite(STORAGE_KEYS.TOKEN, freshToken);
+      seq = resumed ? (Number(res.seq_watermark) || 0) + 1 : 0;
     }
 
     async function flush() {
@@ -217,15 +299,20 @@
 
     async function startRecording() {
       if (recording) return;
-      // Each recording gets a fresh session token. A prior stopRecording
-      // left the previous token alive so a subsequent report() could still
-      // submit the drained tail; if the host is instead beginning a new
-      // reproduction, that tail is abandoned and we mint a new session.
+      // A prior `stopRecording` left the old token alive so a
+      // subsequent `report()` could submit the drained tail. Starting
+      // a *new* reproduction abandons that tail and mints fresh.
+      // `ensureSession` will attempt a resume against any stored
+      // token first (ADR-0003); we only null the in-memory token,
+      // not the storage slot.
       sessionToken = null;
       seq = 0;
       await ensureSession();
       recorder = createRecorder({ buffer });
       recording = true;
+      // On-demand auto-resume after a page navigation keys off this
+      // flag (autoMount reads it at mount). Continuous ignores it.
+      storageWrite(STORAGE_KEYS.RECORDING, "active");
       scheduleFlush();
     }
 
@@ -234,6 +321,7 @@
       recorder?.stop?.();
       recorder = null;
       recording = false;
+      storageClear(STORAGE_KEYS.RECORDING);
       // Stop the periodic flush before the final drain — otherwise the
       // timer keeps firing no-op `/events` posts (and occasionally racing
       // with late rrweb cleanup emissions) after we've torn down.
@@ -252,6 +340,11 @@
       buffer.drain();
       sessionToken = null;
       seq = 0;
+      // Drop the continuity token too — reset means "new reproduction",
+      // not "rejoin the old one". `startRecording` will mint a fresh
+      // session via `ensureSession`.
+      storageClear(STORAGE_KEYS.TOKEN);
+      storageClear(STORAGE_KEYS.RECORDING);
       await startRecording();
     }
 
@@ -296,8 +389,62 @@
       cancelFlushTimer();
       sessionToken = null;
       seq = 0;
+      // The session is closed server-side after submit; drop both
+      // continuity slots so the next page load starts clean rather
+      // than trying to resume a finished session.
+      storageClear(STORAGE_KEYS.TOKEN);
+      storageClear(STORAGE_KEYS.RECORDING);
       if (cfg.recording !== "on_demand") {
         await startRecording().catch(() => {});
+      }
+    }
+
+    // Tail flush on page teardown (ADR-0003 Phase 1). `fetch` with
+    // `keepalive: true` is the one transport that survives navigation
+    // — `fetch(..., { keepalive: false })` is cancelled by the browser
+    // the moment unload starts. A double-flush guard prevents
+    // `pagehide` + `beforeunload` from sending the same tail twice.
+    //
+    // OQ3 cap: at most `3 × maxEventsPerBatch` events; overflow
+    // dropped with one `console.warn`. The 64KB keepalive body limit
+    // is well clear of that.
+    let unloadFired = false;
+    function flushOnUnload() {
+      if (unloadFired) return;
+      unloadFired = true;
+      if (!sessionToken) return;
+
+      const events = buffer.drain();
+      if (events.length === 0) return;
+
+      const cap = cfg.maxEventsPerBatch * 3;
+      const toSend = events.slice(0, cap);
+      const dropped = events.length - toSend.length;
+      if (dropped > 0) {
+        console.warn(
+          `[PhoenixReplay] unload buffer overflow — ${dropped} events dropped`
+        );
+      }
+
+      const headers = { "content-type": "application/json" };
+      if (csrfToken) headers[cfg.csrfHeader] = csrfToken;
+      if (sessionToken) headers[cfg.tokenHeader] = sessionToken;
+
+      for (const batch of chunk(toSend, cfg.maxEventsPerBatch)) {
+        const body = JSON.stringify({ seq, events: batch });
+        seq += 1;
+        try {
+          fetch(`${basePath}${cfg.eventsPath}`, {
+            method: "POST",
+            headers,
+            body,
+            credentials: "same-origin",
+            keepalive: true,
+          });
+        } catch {
+          // We're unloading — nowhere sensible to surface a
+          // fire-and-forget failure.
+        }
       }
     }
 
@@ -305,6 +452,7 @@
       start,
       report,
       flush,
+      flushOnUnload,
       startRecording,
       stopRecording,
       resetRecording,
@@ -498,6 +646,24 @@
     return iter.done ? null : iter.value;
   }
 
+  // Install once. On page teardown, every mounted client drains its
+  // ring buffer via `fetch(..., { keepalive: true })` so tail events
+  // reach the server despite the unload. Both `pagehide` and
+  // `beforeunload` fire the handler — the client's own double-fire
+  // guard keeps us from sending twice. `pagehide` is the primary
+  // signal (bfcache-safe); `beforeunload` is the fallback for UAs
+  // where `pagehide` is flaky.
+  function installUnloadListener() {
+    if (installUnloadListener.installed) return;
+    installUnloadListener.installed = true;
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      instances.forEach(({ client }) => client.flushOnUnload?.());
+    };
+    window.addEventListener("pagehide", handler, { capture: true });
+    window.addEventListener("beforeunload", handler, { capture: true });
+  }
+
   // Install once. Any element marked with [data-phoenix-replay-trigger]
   // (including elements added to the DOM after page load) opens the panel
   // when clicked. Delegation avoids re-binding per element.
@@ -612,7 +778,16 @@
         );
       }
       installTriggerListener();
-      if (!onDemand) await client.start();
+      installUnloadListener();
+      if (!onDemand) {
+        await client.start();
+      } else if (storageRead(STORAGE_KEYS.RECORDING) === "active") {
+        // Cross-navigation resume (ADR-0003 Phase 1). Route through
+        // the panel orchestrator so a stale/interrupted session
+        // surfaces in the error screen instead of silently failing.
+        // Successful resume silently re-shows the pill.
+        handleStartFromPanel();
+      }
       return client;
     },
 

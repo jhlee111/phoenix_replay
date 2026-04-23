@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Session continuity across page loads — Phase 1 (ADR-0003).
+  Recordings now survive `<a href>` navigations, form posts, LV↔dead-view
+  transitions, and reloads. Client caches the session token in
+  `sessionStorage` and sends it back to `/session` as a resume header on
+  the next page; server calls the new `Storage.resume_session/2` callback
+  to decide whether to resume or mint fresh. Full ADR-0003 open questions
+  resolved in this phase: `:continuous` silently starts fresh on stale,
+  `:on_demand` surfaces the panel error screen (reusing the ADR-0002
+  Phase 2 infra); `session_idle_timeout_ms` config (default 15 minutes)
+  gates resumability.
+- `window.navigator`-like tail flush via `fetch(..., { keepalive: true })`
+  on `pagehide` + `beforeunload` — tail events that used to die in the
+  unload now deliver. Capped at `3 × maxEventsPerBatch` per unload (OQ3)
+  with a single `console.warn` on overflow. Double-flush guard
+  coordinates the two event listeners.
+- `:on_demand` widgets auto-resume at mount when
+  `sessionStorage.phx_replay_recording === "active"`: the pill re-appears
+  without a click, carrying the same `session_id` across pages. Stale
+  resumes route through the panel's error screen with a Retry CTA.
+- `PhoenixReplay.Storage.resume_session/2` behaviour callback +
+  `PhoenixReplay.Storage.Events.resume/4` helper shared by shipped
+  adapters (Ecto + AshFeedback). Adapters that predate ADR-0003 need to
+  implement the new callback.
+- `:session_idle_timeout_ms` config key (default `900_000`, 15 minutes
+  per OQ2). Last-event-at older than this marks the session stale.
+- `POST /session` response shape extended with `resumed :: boolean` and
+  `seq_watermark :: integer`. Existing clients (no resume header)
+  continue to see `resumed: false, seq_watermark: 0` — backward
+  compatible.
+- `PhoenixReplaySessionInterruptedError` JS error class raised from
+  `ensureSession` when an `:on_demand` widget's cached token fails
+  resume. Panel orchestrator catches and renders the error screen.
 - Phase 0 scaffold: repo, Hex metadata, CI, module stubs with docstring
   contracts for `PhoenixReplay.Router.feedback_routes/2`,
   `PhoenixReplay.Storage` (behaviour), and `PhoenixReplay.Config`.

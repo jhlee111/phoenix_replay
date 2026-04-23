@@ -1,31 +1,81 @@
 defmodule PhoenixReplay.SessionController do
   @moduledoc false
   # POST /session — mints a session token binding identity to a fresh
-  # session_id. Identity is provided by the `Identify` plug (host hook).
+  # session_id. If the client carries a prior token in the
+  # `x-phoenix-replay-session` header, try to resume the session
+  # instead of minting fresh (ADR-0003 Phase 1).
+  #
+  # Response shape:
+  #   %{token, session_id, resumed :: boolean, seq_watermark :: integer}
+  #
+  # `resumed: true` ⇒ reuse `session_id`; client keeps numbering from
+  # `seq_watermark + 1`. `resumed: false` ⇒ fresh session; client
+  # must discard any cached token.
 
   use Phoenix.Controller, formats: [:json]
 
   alias PhoenixReplay.{SessionToken, Storage}
   alias PhoenixReplay.Plug.Identify
 
+  @resume_header "x-phoenix-replay-session"
+
   def create(conn, _params) do
     identity = Identify.fetch(conn)
+    now = DateTime.utc_now()
 
-    with {:ok, session_id} <- Storage.Dispatch.start_session(identity, DateTime.utc_now()),
-         {:ok, token} <- SessionToken.mint(session_id, identity) do
-      conn
-      |> put_status(:ok)
-      |> json(%{token: token, session_id: session_id})
+    case attempt_resume(conn, identity, now) do
+      {:ok, session_id, seq_watermark} ->
+        mint_response(conn, identity, session_id, resumed: true, seq_watermark: seq_watermark)
+
+      :fresh ->
+        with {:ok, session_id} <- Storage.Dispatch.start_session(identity, now) do
+          mint_response(conn, identity, session_id, resumed: false, seq_watermark: 0)
+        else
+          {:error, reason} -> reason_error(conn, reason)
+        end
+    end
+  end
+
+  # Any failure in the resume chain — no header, bad token, stale
+  # session, identity mismatch — collapses to `:fresh`, which routes
+  # the caller to the standard mint path. Fresh-session errors are
+  # surfaced separately so we don't mask real storage problems.
+  defp attempt_resume(conn, identity, now) do
+    with [token | _] <- get_req_header(conn, @resume_header),
+         {:ok, session_id} <- SessionToken.verify(token, identity),
+         {:ok, ^session_id, seq_watermark} <- Storage.Dispatch.resume_session(session_id, now) do
+      {:ok, session_id, seq_watermark}
     else
-      {:error, :no_secret} ->
+      _ -> :fresh
+    end
+  end
+
+  defp mint_response(conn, identity, session_id, opts) do
+    case SessionToken.mint(session_id, identity) do
+      {:ok, token} ->
         conn
-        |> put_status(:service_unavailable)
-        |> json(%{error: "phoenix_replay not configured"})
+        |> put_status(:ok)
+        |> json(%{
+          token: token,
+          session_id: session_id,
+          resumed: Keyword.fetch!(opts, :resumed),
+          seq_watermark: Keyword.fetch!(opts, :seq_watermark)
+        })
 
       {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: "start_session_failed", reason: inspect(reason)})
+        reason_error(conn, reason)
     end
+  end
+
+  defp reason_error(conn, :no_secret) do
+    conn
+    |> put_status(:service_unavailable)
+    |> json(%{error: "phoenix_replay not configured"})
+  end
+
+  defp reason_error(conn, reason) do
+    conn
+    |> put_status(:internal_server_error)
+    |> json(%{error: "start_session_failed", reason: inspect(reason)})
   end
 end

@@ -41,6 +41,11 @@ defmodule PhoenixReplay.Config do
       environment variable; rotating invalidates in-flight sessions
       (acceptable for staging).
 
+    * `:session_idle_timeout_ms` — milliseconds of inactivity after
+      which a session is no longer resumable across page loads.
+      Default: 900_000 (15 minutes). See ADR-0003 OQ2. Hosts running
+      long manual reproduction workflows can widen this.
+
   ## Example
 
       config :phoenix_replay,
@@ -71,6 +76,9 @@ defmodule PhoenixReplay.Config do
 
   @doc false
   def session_token_secret, do: fetch(:session_token_secret)
+
+  @doc false
+  def session_idle_timeout_ms, do: fetch(:session_idle_timeout_ms, 900_000)
 
   @doc false
   def empty_map(_conn), do: %{}

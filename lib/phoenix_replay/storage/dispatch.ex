@@ -10,6 +10,10 @@ defmodule PhoenixReplay.Storage.Dispatch do
     adapter().start_session(identity || %{kind: :anonymous}, now)
   end
 
+  def resume_session(session_id, now) do
+    adapter().resume_session(session_id, now)
+  end
+
   def append_events(session_id, seq, batch) do
     adapter().append_events(session_id, seq, batch)
   end

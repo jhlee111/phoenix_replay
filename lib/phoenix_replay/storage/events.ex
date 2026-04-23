@@ -47,6 +47,48 @@ defmodule PhoenixReplay.Storage.Events do
   end
 
   @doc """
+  Checks whether `session_id` is resumable based on event freshness.
+  Shared by adapters that don't carry a separate session-state table
+  (both shipped adapters use the events row itself as the liveness
+  signal — no session row exists until `/submit`).
+
+  Returns `{:ok, session_id, seq_watermark}` when the most recent
+  event is newer than `idle_timeout_ms`, `{:error, :stale}` when the
+  session exists but is too old, `{:error, :not_found}` when no
+  event rows exist. Identity-binding is handled by the token in the
+  caller.
+  """
+  @spec resume(repo :: module(), session_id :: String.t(),
+               idle_timeout_ms :: non_neg_integer(), now :: DateTime.t()) ::
+          {:ok, String.t(), non_neg_integer()}
+          | {:error, :not_found | :stale}
+  def resume(repo, session_id, idle_timeout_ms, now)
+      when is_atom(repo) and is_binary(session_id) and is_integer(idle_timeout_ms) do
+    cutoff = DateTime.add(now, -idle_timeout_ms, :millisecond)
+
+    row =
+      from(e in Event,
+        where: e.session_id == ^session_id,
+        order_by: [desc: e.seq],
+        limit: 1,
+        select: {e.seq, e.inserted_at}
+      )
+      |> repo.one()
+
+    case row do
+      nil ->
+        {:error, :not_found}
+
+      {seq, last_at} ->
+        if DateTime.compare(last_at, cutoff) == :gt do
+          {:ok, session_id, seq}
+        else
+          {:error, :stale}
+        end
+    end
+  end
+
+  @doc """
   Returns the ordered concatenation of every batch for `session_id`.
   The result is the flat list of rrweb events — ready to feed into
   `new rrwebPlayer({ events, ... })` on the client.

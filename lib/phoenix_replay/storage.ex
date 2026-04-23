@@ -50,6 +50,29 @@ defmodule PhoenixReplay.Storage do
   @callback start_session(identity(), now :: DateTime.t()) ::
               {:ok, session_id()} | {:error, term()}
 
+  @doc """
+  Resume check for a prior session. Called from `POST /session` when
+  the client sends its `sessionStorage`-cached token. Identity is
+  already verified upstream by `PhoenixReplay.SessionToken`'s
+  signature (the token binds `session_id` to an `identity_hash`), so
+  this callback only has to answer "is there still event data for
+  this session, and is it recent enough to keep appending?"
+
+  Returns the current `seq_watermark` (max `seq` written so far) so
+  the resumed client can keep numbering from there.
+
+  - `{:ok, session_id, seq_watermark}` — resumable; client continues.
+  - `{:error, :not_found}` — no events on record for this session.
+  - `{:error, :stale}` — last event older than
+    `Config.session_idle_timeout_ms/0`; caller mints a fresh session.
+
+  Added in ADR-0003 Phase 1. Adapters predating ADR-0003 need to
+  implement this callback.
+  """
+  @callback resume_session(session_id(), now :: DateTime.t()) ::
+              {:ok, session_id(), seq_watermark :: non_neg_integer()}
+              | {:error, :not_found | :stale | term()}
+
   @callback append_events(session_id(), seq :: non_neg_integer(), event_batch()) ::
               :ok | {:error, term()}
 
