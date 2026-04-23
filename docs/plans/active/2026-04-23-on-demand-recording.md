@@ -330,15 +330,19 @@ storage touches.
   real consumer case emerges — ADR-0002 explicitly out-of-scope
 - **Plan**: JS test infrastructure — rising relevance as JS surface
   grows (ADR-0001 already flagged this)
-- **Plan**: LiveView lifecycle compatibility audit — two pre-existing
-  concerns surfaced but deferred during Phase 1 smoke:
-  (a) `autoMount` only fires on `DOMContentLoaded`, so a
-  `push_navigate` to a route that re-renders the mount div won't
-  re-register the widget; root-layout integrations are unaffected
-  but per-LV-page widgets could be.
-  (b) The mount div has no `phx-update="ignore"`; the library's
-  injected DOM relies on LV's reconciler not touching children that
-  the template didn't declare. Works today but is an implicit
-  contract. Both apply equally to `:continuous` and `:on_demand` —
-  not a Phase 1 or Phase 2 blocker, but worth its own plan before
-  consumers hit the edge.
+- **ADR-0003 (Accepted): Session Continuity Across Page Loads** —
+  multi-page reproductions are the realistic QA workflow, but every
+  full page load (dead views, form submits, LV↔dead) destroys the
+  client's recording. ADR-0003 specifies a two-layer solution:
+  client-side `sessionStorage` token + `sendBeacon` flush on
+  `pagehide` + `isRecording` flag (Layer 1), plus server-side
+  per-session GenServer for resume semantics, live admin view via
+  PubSub, and abandonment cleanup (Layer 2). Orthogonal to Phase 2
+  of this plan — Phase 2 can ship independently. Implementation
+  plan TBD.
+- **LiveView lifecycle compatibility** — was a separate follow-up
+  candidate; largely subsumed by ADR-0003 Layer 1. The one remaining
+  concern (mount div lacking `phx-update="ignore"` when placed inside
+  `inner_content`) is a documentation/guidance item: recommend
+  mounting the widget in root layout, which is already the install
+  guide's position.
