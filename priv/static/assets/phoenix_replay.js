@@ -221,16 +221,13 @@
 
   // ---- widget UI ---------------------------------------------------------
 
-  function renderWidget(mountEl, client, cfg) {
+  // The panel (modal + form) is created in both :float and :headless modes.
+  // The toggle button is only created in :float. Both are children of the
+  // same `.phx-replay-widget` root so host CSS targets a single scope.
+  function renderPanel(mountEl, client, cfg) {
     const root = document.createElement("div");
     root.className = "phx-replay-widget";
-    const position = VALID_POSITIONS.has(cfg.position) ? cfg.position : "bottom_right";
-    const positionClass = `phx-replay-toggle--${position.replace(/_/g, "-")}`;
     root.innerHTML = `
-      <button type="button" class="phx-replay-toggle ${positionClass}" aria-label="Report an issue">
-        <span aria-hidden="true">⚠︎</span>
-        <span class="phx-replay-toggle-text">${cfg.widgetText}</span>
-      </button>
       <div class="phx-replay-modal" role="dialog" aria-hidden="true" aria-labelledby="phx-replay-title">
         <div class="phx-replay-modal-backdrop"></div>
         <form class="phx-replay-modal-panel">
@@ -263,16 +260,15 @@
     const form = root.querySelector(".phx-replay-modal-panel");
     const status = root.querySelector(".phx-replay-status");
 
-    function openModal() { modal.setAttribute("aria-hidden", "false"); }
-    function closeModal() {
+    function open() { modal.setAttribute("aria-hidden", "false"); }
+    function close() {
       modal.setAttribute("aria-hidden", "true");
       form.reset();
       status.textContent = "";
     }
 
-    root.querySelector(".phx-replay-toggle").addEventListener("click", openModal);
-    root.querySelector(".phx-replay-cancel").addEventListener("click", closeModal);
-    root.querySelector(".phx-replay-modal-backdrop").addEventListener("click", closeModal);
+    root.querySelector(".phx-replay-cancel").addEventListener("click", close);
+    root.querySelector(".phx-replay-modal-backdrop").addEventListener("click", close);
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -285,10 +281,60 @@
           jamLink: data.get("jam_link") || null,
         });
         status.textContent = "Thanks! Your report was submitted.";
-        setTimeout(closeModal, 1200);
+        setTimeout(close, 1200);
       } catch (err) {
         status.textContent = `Submit failed: ${err.message}`;
       }
+    });
+
+    return { root, open, close };
+  }
+
+  function renderToggle(widgetRoot, cfg, panelApi) {
+    const position = VALID_POSITIONS.has(cfg.position) ? cfg.position : "bottom_right";
+    const positionClass = `phx-replay-toggle--${position.replace(/_/g, "-")}`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `phx-replay-toggle ${positionClass}`;
+    btn.setAttribute("aria-label", "Report an issue");
+    btn.innerHTML = `
+      <span aria-hidden="true">⚠︎</span>
+      <span class="phx-replay-toggle-text">${cfg.widgetText}</span>
+    `;
+    // Insert the button BEFORE the modal so the tab order starts with the
+    // trigger. The panel remains centered/overlaid by its own styles.
+    widgetRoot.insertBefore(btn, widgetRoot.firstChild);
+    btn.addEventListener("click", panelApi.open);
+    return btn;
+  }
+
+  // Registry of mounted panels keyed by the mount element. `open`/`close`
+  // on the global delegate to the first entry (99% case has one widget per
+  // page); multi-mount emits a console warning.
+  const instances = new Map();
+
+  function firstInstance() {
+    const iter = instances.values().next();
+    return iter.done ? null : iter.value;
+  }
+
+  // Install once. Any element marked with [data-phoenix-replay-trigger]
+  // (including elements added to the DOM after page load) opens the panel
+  // when clicked. Delegation avoids re-binding per element.
+  function installTriggerListener() {
+    if (installTriggerListener.installed) return;
+    installTriggerListener.installed = true;
+    if (typeof document === "undefined") return;
+    document.addEventListener("click", (e) => {
+      const trigger = e.target.closest && e.target.closest("[data-phoenix-replay-trigger]");
+      if (!trigger) return;
+      e.preventDefault();
+      const inst = firstInstance();
+      if (!inst) {
+        console.warn("[PhoenixReplay] trigger clicked but no widget is mounted");
+        return;
+      }
+      inst.open();
     });
   }
 
@@ -299,9 +345,35 @@
       if (!opts?.mount) throw new Error("PhoenixReplay.init: mount element is required");
       const cfg = Object.assign({}, DEFAULTS, opts);
       const client = createClient(cfg);
-      renderWidget(cfg.mount, client, cfg);
+      const panel = renderPanel(cfg.mount, client, cfg);
+      const mode = cfg.mode === "headless" ? "headless" : "float";
+      if (mode === "float") {
+        renderToggle(panel.root, cfg, panel);
+      }
+      instances.set(cfg.mount, panel);
+      if (instances.size > 1) {
+        console.warn(
+          "[PhoenixReplay] multiple widget instances detected; " +
+            "window.PhoenixReplay.open()/close() will act on the first."
+        );
+      }
+      installTriggerListener();
       await client.start();
       return client;
+    },
+
+    // Open the first mounted panel. Usable from host JS, dropdown menu
+    // items, keyboard shortcuts, etc. No-op if no widget is mounted.
+    open() {
+      const inst = firstInstance();
+      if (inst) inst.open();
+    },
+
+    // Close the first mounted panel. Usable from host JS after triggering
+    // submit programmatically or canceling a flow.
+    close() {
+      const inst = firstInstance();
+      if (inst) inst.close();
     },
 
     // Auto-mount helper: finds elements with [data-phoenix-replay] and
@@ -318,6 +390,7 @@
           csrfToken: el.dataset.csrfToken,
           widgetText: el.dataset.widgetText,
           position: el.dataset.position,
+          mode: el.dataset.mode,
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));
       });
     },

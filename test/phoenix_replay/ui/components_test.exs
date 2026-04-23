@@ -192,5 +192,40 @@ defmodule PhoenixReplay.UI.ComponentsTest do
         assert html =~ ~s(data-position="#{preset}")
       end
     end
+
+    test "mode defaults to float" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-mode="float")
+    end
+
+    test "mode={:headless} flows to data-mode attr" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          mode: :headless
+        )
+
+      assert html =~ ~s(data-mode="headless")
+    end
+
+    test "asset_path={nil} suppresses stylesheet and script tags" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          asset_path: nil
+        )
+
+      refute html =~ "phoenix_replay.css"
+      refute html =~ "phoenix_replay.js"
+      # mount div still present — host is expected to self-host library JS
+      assert html =~ ~s(data-phoenix-replay)
+    end
   end
 end

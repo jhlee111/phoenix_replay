@@ -66,6 +66,15 @@ defmodule PhoenixReplay.UI.Components do
         "custom properties `--phx-replay-toggle-{bottom,right,top,left,z}` " <>
         "on any ancestor or on `.phx-replay-toggle` directly."
 
+  attr :mode, :atom,
+    default: :float,
+    values: [:float, :headless],
+    doc:
+      "`:float` renders the floating toggle button (default). `:headless` " <>
+        "renders only the panel; host wires its own trigger via " <>
+        "`[data-phoenix-replay-trigger]` on any element or by calling " <>
+        "`window.PhoenixReplay.open()` / `.close()`."
+
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
     doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
@@ -82,7 +91,10 @@ defmodule PhoenixReplay.UI.Components do
     default: "/phoenix_replay",
     doc:
       "Public path prefix where `phoenix_replay.js` / `phoenix_replay.css` " <>
-        "are served. Mount `Plug.Static, at: asset_path, from: {:phoenix_replay, \"priv/static/assets\"}`."
+        "are served. Mount `Plug.Static, at: asset_path, from: {:phoenix_replay, \"priv/static/assets\"}`. " <>
+        "Pass `nil` to skip both the stylesheet and script tags — useful when " <>
+        "the host self-hosts library assets through its own bundler or wants " <>
+        "to ship fully custom styling in `:headless` mode."
 
   attr :rest, :global
 
@@ -95,17 +107,18 @@ defmodule PhoenixReplay.UI.Components do
   """
   def phoenix_replay_widget(assigns) do
     ~H"""
-    <link rel="stylesheet" href={"#{@asset_path}/phoenix_replay.css"} />
+    <link :if={@asset_path} rel="stylesheet" href={"#{@asset_path}/phoenix_replay.css"} />
     <script :if={@rrweb_src} src={@rrweb_src} crossorigin="anonymous"></script>
     <script :if={@rrweb_console_src} src={@rrweb_console_src} crossorigin="anonymous"></script>
     <script :if={@rrweb_network_src} src={@rrweb_network_src} crossorigin="anonymous"></script>
-    <script src={"#{@asset_path}/phoenix_replay.js"} defer></script>
+    <script :if={@asset_path} src={"#{@asset_path}/phoenix_replay.js"} defer></script>
     <div
       data-phoenix-replay
       data-base-path={@base_path}
       data-csrf-token={@csrf_token}
       data-widget-text={@widget_text}
       data-position={@position}
+      data-mode={@mode}
       {@rest}
     />
     """

@@ -35,3 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or any ancestor. Preset modifier classes use `:where()` so host
   overrides win without needing `!important`. Implements ADR-0001
   Phase 1.
+- `mode` attr on `phoenix_replay_widget/1` with two values: `:float`
+  (default, renders the floating toggle button) and `:headless` (no
+  toggle — host wires its own trigger). Implements ADR-0001 Phase 2.
+- `[data-phoenix-replay-trigger]` HTML hook: any element with that
+  attribute opens the panel on click. Uses document-level event
+  delegation, so dynamically-added triggers work without re-binding.
+- `window.PhoenixReplay.open()` / `window.PhoenixReplay.close()` JS
+  API. Delegates to the first mounted widget (common 1-widget-per-page
+  case). Multi-mount emits a console warning.
+- `asset_path={nil}` opt-out: both the stylesheet link and the client
+  script tag are skipped, leaving only the mount element. Intended for
+  hosts that bundle library assets through their own toolchain or want
+  to ship fully custom styling in `:headless` mode.
+- Internal refactor: `renderWidget` split into `renderPanel`
+  (always-created, owns open/close) and `renderToggle` (only in
+  `:float` mode). Enables the headless API and `open`/`close` hook
+  without duplicating form logic.
