@@ -67,6 +67,12 @@
   background: var(--phx-replay-primary-hover);
 }
 
+/* `.phx-replay-toggle` is `display: inline-flex`, which outranks the UA
+ * `[hidden]` rule in the author cascade. Re-assert it so `btn.hidden =
+ * true` from JS actually hides the toggle (matched by the pill below).
+ */
+.phx-replay-toggle[hidden] { display: none; }
+
 .phx-replay-modal[aria-hidden="true"] {
   display: none;
 }
@@ -96,15 +102,33 @@
   background: var(--phx-replay-surface);
   border-radius: 0.75rem;
   box-shadow: var(--phx-replay-shadow);
+}
+
+/* Each screen (idle_start / error / form) owns its own vertical flow.
+ * Only one screen is visible at a time; the others are hidden via the
+ * HTML `hidden` attribute, which we explicitly respect here in case the
+ * host's reset stylesheet neutralized UA defaults.
+ */
+.phx-replay-screen {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
+.phx-replay-screen[hidden] { display: none; }
+
 .phx-replay-modal-panel h2 {
   margin: 0;
   font-size: 1.125rem;
   font-weight: 600;
+}
+
+.phx-replay-screen-lede,
+.phx-replay-error-message {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--phx-replay-text-muted);
+  line-height: 1.5;
 }
 
 .phx-replay-modal-panel label {
@@ -141,7 +165,9 @@
 }
 
 .phx-replay-cancel,
-.phx-replay-submit {
+.phx-replay-submit,
+.phx-replay-start-cta,
+.phx-replay-retry {
   padding: 0.5rem 0.875rem;
   border-radius: 0.5rem;
   font-size: 0.875rem;
@@ -156,12 +182,16 @@
   border-color: var(--phx-replay-border);
 }
 
-.phx-replay-submit {
+.phx-replay-submit,
+.phx-replay-start-cta,
+.phx-replay-retry {
   background: var(--phx-replay-primary);
   color: #fff;
 }
 
-.phx-replay-submit:hover {
+.phx-replay-submit:hover,
+.phx-replay-start-cta:hover,
+.phx-replay-retry:hover {
   background: var(--phx-replay-primary-hover);
 }
 
@@ -169,4 +199,83 @@
   font-size: 0.8125rem;
   color: var(--phx-replay-text-muted);
   min-height: 1.25rem;
+}
+
+/* Recording pill: :float + :on_demand indicator that replaces the toggle
+ * during an active reproduction. Position + sizing mirror the toggle but
+ * live under an independent `--phx-replay-pill-*` CSS var family so hosts
+ * can fine-tune each without affecting the other.
+ */
+.phx-replay-pill {
+  position: fixed;
+  bottom: var(--phx-replay-pill-bottom, 1rem);
+  right:  var(--phx-replay-pill-right,  1rem);
+  top:    var(--phx-replay-pill-top,    auto);
+  left:   var(--phx-replay-pill-left,   auto);
+  z-index: var(--phx-replay-pill-z, 9999);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem 0.375rem 0.875rem;
+  background: var(--phx-replay-surface);
+  color: var(--phx-replay-text);
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 9999px;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  box-shadow: var(--phx-replay-shadow);
+}
+
+.phx-replay-pill[hidden] { display: none; }
+
+.phx-replay-pill-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #ef4444;
+  animation: phx-replay-pill-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes phx-replay-pill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.85); }
+}
+
+.phx-replay-pill-stop {
+  margin-left: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  font: inherit;
+  font-size: 0.75rem;
+  background: var(--phx-replay-primary);
+  color: #fff;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+
+.phx-replay-pill-stop:hover {
+  background: var(--phx-replay-primary-hover);
+}
+
+/* Position presets — parallel to the toggle's. Zero-specificity so
+ * `.phx-replay-pill { --phx-replay-pill-top: 5rem; }` in a host
+ * stylesheet always wins.
+ */
+:where(.phx-replay-pill--bottom-left) {
+  --phx-replay-pill-right: auto;
+  --phx-replay-pill-left:  1rem;
+}
+
+:where(.phx-replay-pill--top-right) {
+  --phx-replay-pill-bottom: auto;
+  --phx-replay-pill-top:    1rem;
+}
+
+:where(.phx-replay-pill--top-left) {
+  --phx-replay-pill-bottom: auto;
+  --phx-replay-pill-top:    1rem;
+  --phx-replay-pill-right:  auto;
+  --phx-replay-pill-left:   1rem;
 }

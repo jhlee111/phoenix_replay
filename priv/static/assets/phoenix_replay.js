@@ -35,6 +35,18 @@
 
   const VALID_POSITIONS = new Set(["bottom_right", "bottom_left", "top_right", "top_left"]);
 
+  // Shared by renderToggle + renderPill — both elements use the same
+  // four-corner preset family. If VALID_POSITIONS ever grows, the CSS
+  // `.phx-replay-{toggle,pill}--*` preset rules must grow in lock-step.
+  function positionClass(kind, cfg) {
+    const p = VALID_POSITIONS.has(cfg.position) ? cfg.position : "bottom_right";
+    return `phx-replay-${kind}--${p.replace(/_/g, "-")}`;
+  }
+
+  // Panel screens. Kept as named constants so typos become
+  // ReferenceErrors rather than silent "nothing shows" bugs.
+  const SCREENS = { IDLE_START: "idle_start", ERROR: "error", FORM: "form" };
+
   // ---- transport ---------------------------------------------------------
 
   async function postJson(url, body, { csrfToken, sessionToken, tokenHeader, csrfHeader, gzip = false }) {
@@ -303,54 +315,109 @@
 
   // ---- widget UI ---------------------------------------------------------
 
-  // The panel (modal + form) is created in both :float and :headless modes.
-  // The toggle button is only created in :float. Both are children of the
-  // same `.phx-replay-widget` root so host CSS targets a single scope.
+  // The panel (modal + multi-screen body) is created in both :float and
+  // :headless modes. The toggle button and the recording pill only appear
+  // in :float. All three are children of the same `.phx-replay-widget`
+  // root so host CSS targets a single scope.
+  //
+  // Screens: `idle_start` (only rendered for `:on_demand`), `error`
+  // (session handshake failure), `form` (the description/severity/submit
+  // flow — the only screen used in `:continuous`).
   function renderPanel(mountEl, client, cfg) {
     const root = document.createElement("div");
     root.className = "phx-replay-widget";
     root.innerHTML = `
       <div class="phx-replay-modal" role="dialog" aria-hidden="true" aria-labelledby="phx-replay-title">
         <div class="phx-replay-modal-backdrop"></div>
-        <form class="phx-replay-modal-panel">
-          <h2 id="phx-replay-title">Report an issue</h2>
-          <label>
-            <span>What happened?</span>
-            <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
-          </label>
-          <label>
-            <span>Severity</span>
-            <select name="severity">
-              ${cfg.severities.map(s => `<option value="${s}"${s === cfg.defaultSeverity ? " selected" : ""}>${s}</option>`).join("")}
-            </select>
-          </label>
-          <label>
-            <span>Jam link (optional)</span>
-            <input name="jam_link" type="url" placeholder="https://jam.dev/c/..." />
-          </label>
-          <div class="phx-replay-actions">
-            <button type="button" class="phx-replay-cancel">Cancel</button>
-            <button type="submit" class="phx-replay-submit">Send</button>
-          </div>
-          <div class="phx-replay-status" aria-live="polite"></div>
-        </form>
+        <div class="phx-replay-modal-panel">
+          <section class="phx-replay-screen phx-replay-screen--idle-start" data-screen="${SCREENS.IDLE_START}" hidden>
+            <h2>Start reproduction</h2>
+            <p class="phx-replay-screen-lede">
+              Click <strong>Start</strong>, reproduce the issue, then click <strong>Stop</strong> in the recording pill.
+              Nothing is captured until you start.
+            </p>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+              <button type="button" class="phx-replay-start-cta">Start reproduction</button>
+            </div>
+          </section>
+
+          <section class="phx-replay-screen phx-replay-screen--error" data-screen="${SCREENS.ERROR}" hidden>
+            <h2>Couldn't start recording</h2>
+            <p class="phx-replay-error-message"></p>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+              <button type="button" class="phx-replay-retry">Retry</button>
+            </div>
+          </section>
+
+          <form class="phx-replay-screen phx-replay-screen--form" data-screen="${SCREENS.FORM}">
+            <h2 id="phx-replay-title">Report an issue</h2>
+            <label>
+              <span>What happened?</span>
+              <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
+            </label>
+            <label>
+              <span>Severity</span>
+              <select name="severity">
+                ${cfg.severities.map(s => `<option value="${s}"${s === cfg.defaultSeverity ? " selected" : ""}>${s}</option>`).join("")}
+              </select>
+            </label>
+            <label>
+              <span>Jam link (optional)</span>
+              <input name="jam_link" type="url" placeholder="https://jam.dev/c/..." />
+            </label>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+              <button type="submit" class="phx-replay-submit">Send</button>
+            </div>
+            <div class="phx-replay-status" aria-live="polite"></div>
+          </form>
+        </div>
       </div>
     `;
     mountEl.appendChild(root);
 
     const modal = root.querySelector(".phx-replay-modal");
-    const form = root.querySelector(".phx-replay-modal-panel");
-    const status = root.querySelector(".phx-replay-status");
+    const form = root.querySelector(".phx-replay-screen--form");
+    const status = form.querySelector(".phx-replay-status");
+    const screens = root.querySelectorAll(".phx-replay-screen");
+    const errorMessage = root.querySelector(".phx-replay-error-message");
 
-    function open() { modal.setAttribute("aria-hidden", "false"); }
-    function close() {
-      modal.setAttribute("aria-hidden", "true");
-      form.reset();
-      status.textContent = "";
+    // Handlers wired by the init orchestrator — defaults keep the panel
+    // self-consistent if it's ever rendered without external wiring.
+    let onStartClick = () => {};
+    let onRetryClick = () => {};
+
+    function setScreen(name) {
+      screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
     }
 
-    root.querySelector(".phx-replay-cancel").addEventListener("click", close);
+    function showModal() { modal.setAttribute("aria-hidden", "false"); }
+    function hideModal() { modal.setAttribute("aria-hidden", "true"); }
+
+    function openForm() { setScreen(SCREENS.FORM); showModal(); }
+    function openStart() { setScreen(SCREENS.IDLE_START); showModal(); }
+    function openError(message) {
+      errorMessage.textContent = message || "Something went wrong. Please try again.";
+      setScreen(SCREENS.ERROR);
+      showModal();
+    }
+
+    function close() {
+      hideModal();
+      form.reset();
+      status.textContent = "";
+      // Reset to the form screen so a fresh open() without routing shows
+      // the report form (backward-compat for `:continuous`). The init
+      // orchestrator overrides via `openStart` when on-demand + idle.
+      setScreen(SCREENS.FORM);
+    }
+
+    root.querySelectorAll(".phx-replay-cancel").forEach((el) => el.addEventListener("click", close));
     root.querySelector(".phx-replay-modal-backdrop").addEventListener("click", close);
+    root.querySelector(".phx-replay-start-cta").addEventListener("click", () => onStartClick());
+    root.querySelector(".phx-replay-retry").addEventListener("click", () => onRetryClick());
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -369,25 +436,56 @@
       }
     });
 
-    return { root, open, close };
+    return {
+      root,
+      openForm,
+      openStart,
+      openError,
+      close,
+      onStart: (fn) => { onStartClick = fn; },
+      onRetry: (fn) => { onRetryClick = fn; },
+    };
   }
 
-  function renderToggle(widgetRoot, cfg, panelApi) {
-    const position = VALID_POSITIONS.has(cfg.position) ? cfg.position : "bottom_right";
-    const positionClass = `phx-replay-toggle--${position.replace(/_/g, "-")}`;
+  function renderToggle(widgetRoot, cfg, onClick) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `phx-replay-toggle ${positionClass}`;
+    btn.className = `phx-replay-toggle ${positionClass("toggle", cfg)}`;
     btn.setAttribute("aria-label", "Report an issue");
     btn.innerHTML = `
       <span aria-hidden="true">⚠︎</span>
       <span class="phx-replay-toggle-text">${cfg.widgetText}</span>
     `;
-    // Insert the button BEFORE the modal so the tab order starts with the
-    // trigger. The panel remains centered/overlaid by its own styles.
+    // Insert BEFORE the modal so tab order starts with the trigger.
     widgetRoot.insertBefore(btn, widgetRoot.firstChild);
-    btn.addEventListener("click", panelApi.open);
-    return btn;
+    btn.addEventListener("click", onClick);
+    return {
+      show: () => { btn.hidden = false; },
+      hide: () => { btn.hidden = true; },
+    };
+  }
+
+  // Status indicator for an active `:on_demand` reproduction in `:float`
+  // mode. The `--phx-replay-pill-*` CSS var family is deliberately
+  // independent of the toggle's so hosts can place them on different
+  // corners without lock-step.
+  function renderPill(widgetRoot, cfg, onStop) {
+    const pill = document.createElement("div");
+    pill.className = `phx-replay-pill ${positionClass("pill", cfg)}`;
+    pill.setAttribute("role", "status");
+    pill.setAttribute("aria-live", "polite");
+    pill.hidden = true;
+    pill.innerHTML = `
+      <span class="phx-replay-pill-dot" aria-hidden="true"></span>
+      <span class="phx-replay-pill-label">Recording…</span>
+      <button type="button" class="phx-replay-pill-stop">Stop</button>
+    `;
+    widgetRoot.appendChild(pill);
+    pill.querySelector(".phx-replay-pill-stop").addEventListener("click", onStop);
+    return {
+      show: () => { pill.hidden = false; },
+      hide: () => { pill.hidden = true; },
+    };
   }
 
   // Registry of mounted panels keyed by the mount element. `open`/`close`
@@ -416,7 +514,7 @@
         console.warn("[PhoenixReplay] trigger clicked but no widget is mounted");
         return;
       }
-      inst.panel.open();
+      inst.routedOpen();
     });
   }
 
@@ -429,10 +527,84 @@
       const client = createClient(cfg);
       const panel = renderPanel(cfg.mount, client, cfg);
       const mode = cfg.mode === "headless" ? "headless" : "float";
-      if (mode === "float") {
-        renderToggle(panel.root, cfg, panel);
+      const onDemand = cfg.recording === "on_demand";
+
+      // `routedOpen` decides which screen the toggle / trigger / global
+      // `open()` should surface:
+      //   - on-demand + idle → Start CTA screen
+      //   - anything else    → report form (backward-compat)
+      function routedOpen() {
+        if (onDemand && !client.isRecording()) panel.openStart();
+        else panel.openForm();
       }
-      instances.set(cfg.mount, { panel, client });
+
+      let toggle = null;
+      if (mode === "float") {
+        toggle = renderToggle(panel.root, cfg, routedOpen);
+      }
+
+      // The pill only appears for :float + :on_demand. Headless consumers
+      // bring their own indicator; `stopRecording()` still opens the form
+      // (see `handleStop`) so they land in the library's submit flow.
+      let pill = null;
+      if (mode === "float" && onDemand) {
+        pill = renderPill(panel.root, cfg, () => handleStop());
+      }
+
+      // Derive UI state from `client.isRecording()` directly — the client
+      // is the source of truth. Toggle hide/show is gated on the presence
+      // of a pill so :continuous never blinks the toggle; only :float +
+      // :on_demand swaps toggle ↔ pill in place.
+      function syncRecordingUI() {
+        const recording = client.isRecording();
+        if (pill) recording ? pill.show() : pill.hide();
+        if (toggle && pill) recording ? toggle.hide() : toggle.show();
+      }
+
+      // Shared core: guard, await, sync UI. Callers layer their own
+      // error-handling on top (panel shows an error screen; the global
+      // API lets the rejection propagate).
+      async function startAndSync() {
+        const wasRecording = client.isRecording();
+        await client.startRecording();
+        if (!wasRecording) syncRecordingUI();
+      }
+
+      // Called from the panel's Start CTA and its Retry button. A
+      // session-handshake failure surfaces as the `error` screen instead
+      // of an unhandled rejection — clicking Start must never silently
+      // do nothing.
+      async function handleStartFromPanel() {
+        try {
+          await startAndSync();
+          panel.close();
+        } catch (err) {
+          panel.openError(`Couldn't start recording: ${err.message}`);
+        }
+      }
+
+      // Called from the pill Stop button and the global `stopRecording`
+      // API. On-demand additionally opens the submit form so both the
+      // pill path and headless consumers land in the same library flow.
+      async function handleStop() {
+        const wasRecording = client.isRecording();
+        await client.stopRecording();
+        if (!wasRecording) return;
+        syncRecordingUI();
+        if (onDemand) panel.openForm();
+      }
+
+      panel.onStart(handleStartFromPanel);
+      panel.onRetry(handleStartFromPanel);
+
+      instances.set(cfg.mount, {
+        panel,
+        client,
+        cfg,
+        routedOpen,
+        startAndSync,
+        handleStop,
+      });
       if (instances.size > 1) {
         console.warn(
           "[PhoenixReplay] multiple widget instances detected; " +
@@ -440,20 +612,16 @@
         );
       }
       installTriggerListener();
-      // Continuous mode starts recording (and the session handshake) at
-      // mount as today. On-demand waits for an explicit
-      // `startRecording()` call.
-      if (cfg.recording !== "on_demand") {
-        await client.start();
-      }
+      if (!onDemand) await client.start();
       return client;
     },
 
     // Open the first mounted panel. Usable from host JS, dropdown menu
     // items, keyboard shortcuts, etc. No-op if no widget is mounted.
+    // Routes to the Start CTA when the widget is :on_demand and idle.
     open() {
       const inst = firstInstance();
-      if (inst) inst.panel.open();
+      if (inst) inst.routedOpen();
     },
 
     // Close the first mounted panel. Usable from host JS after triggering
@@ -470,15 +638,15 @@
     // handshake failure; callers can surface that in the UI.
     startRecording() {
       const inst = firstInstance();
-      return inst ? inst.client.startRecording() : Promise.resolve();
+      return inst ? inst.startAndSync() : Promise.resolve();
     },
 
-    // Halt rrweb capture and flush the tail of the buffer. The session
-    // stays live so a subsequent submit carries the captured events.
-    // No-op if not currently recording.
+    // Halt rrweb capture and flush the tail of the buffer. In :on_demand
+    // mode this also opens the report form so the user lands in the
+    // submit flow — consistent with the float pill Stop button.
     stopRecording() {
       const inst = firstInstance();
-      return inst ? inst.client.stopRecording() : Promise.resolve();
+      return inst ? inst.handleStop() : Promise.resolve();
     },
 
     // Drop the current buffer and session, then restart recording

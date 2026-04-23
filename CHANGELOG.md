@@ -72,3 +72,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resetRecording` / `isRecording` alongside the legacy `start` /
   `report` / `flush`. `start` now delegates to `startRecording` for
   continuity; no breaking change for hosts calling it directly.
+- Panel state machine for `:on_demand`: the modal now renders
+  `idle_start` (Start CTA with short explanation), `error` (session
+  handshake failure with Retry), and the existing `form` screen. In
+  `:float` + `:on_demand`, toggle clicks route to `idle_start`;
+  submit flow unchanged. Implements ADR-0002 Phase 2.
+- Recording pill (`.phx-replay-pill`): visible during an active
+  `:on_demand` reproduction in `:float` mode. Pulsing dot + Stop
+  button. Clicking Stop halts the recorder, flushes the buffer, and
+  opens the report form. The pill replaces the toggle while recording
+  (continuous mode keeps the toggle visible as before).
+- Pill position presets `.phx-replay-pill--{bottom-right,bottom-left,top-right,top-left}`
+  default to the toggle's corner (derived from the widget's
+  `position` attr). Fine-tune via the independent
+  `--phx-replay-pill-{bottom,right,top,left,z}` CSS var family on
+  `.phx-replay-pill` or any ancestor.
+- Session handshake failure during an `:on_demand` Start click now
+  surfaces as a visible error screen with a Retry button (previously
+  the promise rejection was swallowed by auto-mount). Programmatic
+  `window.PhoenixReplay.startRecording()` still rejects the promise
+  for consumers handling their own UI.
+- `window.PhoenixReplay.stopRecording()` in `:on_demand` now also
+  opens the report form so headless consumers land in the submit flow
+  without extra glue. `:continuous` behavior unchanged.
+- `window.PhoenixReplay.open()` routes to the Start CTA when the
+  widget is `:on_demand` and idle (previously always opened the
+  form). `:continuous` behavior unchanged.
+- `docs/guides/on-demand-recording.md` — end-to-end guide covering
+  continuous vs on-demand trade-offs, privacy positioning, the
+  `:float` and `:headless` flows with worked examples, and multi-tab
+  scope note.

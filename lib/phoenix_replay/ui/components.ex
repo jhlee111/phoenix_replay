@@ -84,8 +84,12 @@ defmodule PhoenixReplay.UI.Components do
         "the bug\" reports work. `:on_demand` keeps the recorder idle " <>
         "until the user clicks Start in the panel (float mode) or the " <>
         "host calls `window.PhoenixReplay.startRecording()` (headless). " <>
+        "In `:float` + `:on_demand`, toggle clicks open a Start CTA; " <>
+        "clicking Start swaps the toggle for a recording pill with a " <>
+        "Stop button, and clicking Stop opens the submit form. " <>
         "Use `:on_demand` when explicit per-session consent or lower " <>
-        "runtime cost matters. See ADR-0002."
+        "runtime cost matters. See ADR-0002 and the " <>
+        "[On-demand recording guide](guides/on-demand-recording.html)."
 
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
