@@ -9,11 +9,11 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
-| — | Session continuity across page loads (ADR-0003) | accepted, plan TBD | — |
+| — | Session continuity across page loads (ADR-0003) | ready (both phases scoped, neither started) | [active/2026-04-23-session-continuity.md](active/2026-04-23-session-continuity.md) |
 | 5f | Igniter installer for `mix phoenix_replay.install` | proposed | [5f-igniter-installer.md](5f-igniter-installer.md) |
 | 6  | Hex publish | deferred | — |
 
-ADR-0003 (session continuity): Accepted 2026-04-23 with all five open questions resolved. Implementation plan not yet written — natural "next workstream" now that ADR-0002 is fully shipped.
+ADR-0003 (session continuity): Accepted 2026-04-23 with all five open questions resolved. Phase 1 is client-side `sessionStorage` + `sendBeacon` + minimal server-side resume; Phase 2 adds the `PhoenixReplay.Session` GenServer + Registry + PubSub layer. Phases are sequential but each ships independently.
 
 ## Completed phases (historical)
 
