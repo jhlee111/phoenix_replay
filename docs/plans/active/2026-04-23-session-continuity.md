@@ -1,8 +1,18 @@
 # Plan: Session Continuity Across Page Loads — Implementation
 
-**Status**: ready (ADR accepted)
-**Started**: —
+**Status**: Phase 1 shipped (2026-04-23, `044f250`); Phase 2 pending
+**Started**: 2026-04-23
 **ADR**: [0003-session-continuity](../../decisions/0003-session-continuity.md)
+
+**Next**: kick off Phase 2 — introduce `PhoenixReplay.SessionRegistry`
++ `PhoenixReplay.Session` GenServer + `PhoenixReplay.SessionSupervisor`
+under `application.ex`, switch `EventsController` writes to route
+through the `Session` process, add PubSub broadcasts (`event_batch` /
+`session_closed` / `session_abandoned`), add the idle-timeout teardown,
+and wire config keys `:pubsub` + `:pubsub_topic_prefix`. The Phase 1
+DB-fallback resume stays in place — Phase 2 adds a Registry-first
+lookup that falls back to the DB path on no-process (covers crash
+restarts cleanly).
 
 ## Overview
 
@@ -169,21 +179,36 @@ Guard the auto-resume branch explicitly in `autoMount`.
     events, trigger `pagehide`, confirm 3 beacons sent + console
     warn about tail drop
 
-### DoD (Phase 1)
+### DoD (Phase 1) — shipped 2026-04-23 in `044f250`
 
-- [ ] `sessionStorage` token + recording-flag round-trip across page
+- [x] `sessionStorage` token + recording-flag round-trip across page
       reloads
-- [ ] `sendBeacon` flush on `pagehide` delivers tail events
-- [ ] `/session` accepts resume header + returns `{resumed, seq_watermark}`
-- [ ] Storage adapter `resume_session/3` callback implemented for
-      shipped adapters
-- [ ] OQ1 stale-token policy: continuous silent, on-demand error screen
-- [ ] CSRF strategy for beacon path decided + documented
+- [x] `fetch keepalive` flush on `pagehide` + `beforeunload` delivers
+      tail events (chose `fetch(..., {keepalive: true})` over
+      `sendBeacon` — preserves the existing
+      `x-phoenix-replay-session` header-based auth; body cap in
+      practice is larger than sendBeacon's 64KB so OQ3's 3-batch cap
+      still fits comfortably)
+- [x] `/session` accepts resume header + returns `{resumed, seq_watermark}`
+- [x] Storage adapter `resume_session/2` callback implemented for
+      shipped adapters (Ecto + AshFeedback both delegate to shared
+      `Storage.Events.resume/4`)
+- [x] OQ1 stale-token policy: continuous silent, on-demand error screen
+      (reuses ADR-0002 Phase 2 error screen)
+- [x] CSRF strategy moot with `fetch keepalive` — existing
+      `x-csrf-token` header flows unchanged. No carve-out needed.
 - [ ] README `Recording modes` section updated with "multi-page
-      continuity" note (no consumer action needed for continuous;
-      error screen for on-demand)
-- [ ] CHANGELOG unreleased entry
-- [ ] All matrix cells pass manual smoke
+      continuity" note — deferred; current behavior is "just works"
+      for continuous, and the on-demand error screen already
+      explains itself in-context. Revisit if a consumer asks.
+- [x] CHANGELOG unreleased entry
+- [x] All matrix cells pass manual smoke (continuous hard-nav,
+      on-demand auto-resume, on-demand stale → error screen, pagehide
+      tail delivery)
+- [ ] Storage + controller unit tests — blocked on the "Ecto sandbox
+      + JS test infra" follow-up (ADR-0001/0002 already flagged it;
+      ADR-0003 inherits). Manual smoke + `project_eval` verification
+      covers the thread until then.
 
 ### Non-goals (Phase 1)
 
