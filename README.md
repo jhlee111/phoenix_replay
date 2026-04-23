@@ -256,6 +256,45 @@ See [`docs/guides/headless-integration.md`](docs/guides/headless-integration.md)
 for worked examples (header link, keyboard shortcut, self-hosted
 assets).
 
+### 4c. Recording mode — continuous vs on-demand
+
+By default (`recording={:continuous}`), rrweb starts capturing the
+moment the widget mounts. The user sees a bug, clicks the toggle,
+describes it, and the preceding events are already on disk —
+retroactive reporting.
+
+Pass `recording={:on_demand}` to flip the contract: the recorder
+stays idle until the user explicitly clicks Start. The `/session`
+handshake is deferred too — sessions that never lead to a
+reproduction create no server state.
+
+```heex
+<PhoenixReplay.UI.Components.phoenix_replay_widget
+  base_path="/api/feedback"
+  csrf_token={get_csrf_token()}
+  recording={:on_demand}
+/>
+```
+
+The four combinations:
+
+| `mode` × `recording` | Behavior |
+|---|---|
+| `:float` × `:continuous` (default) | Toggle visible, rrweb captures from mount, submit flushes the tail. |
+| `:float` × `:on_demand` | Toggle click opens a Start CTA. Start swaps toggle for a pulsing Recording pill with a Stop button; Stop opens the submit form. |
+| `:headless` × `:continuous` | No toggle, rrweb captures from mount, host opens the panel when the user wants to report. |
+| `:headless` × `:on_demand` | No toggle. Host calls `window.PhoenixReplay.startRecording()` / `.stopRecording()` from its own UX (e.g., custom consent modal); `stopRecording()` opens the submit form. |
+
+**Privacy positioning.** `:continuous` is appropriate for internal
+tools, staging, or consumer surfaces where capture is disclosed in
+the privacy policy. `:on_demand` is the right pick for regulated
+verticals, customer-facing beta programs, or any product where
+explicit per-session consent is required. It can always be upgraded
+to `:continuous` later; the reverse is a privacy-policy change.
+
+See [`docs/guides/on-demand-recording.md`](docs/guides/on-demand-recording.md)
+for the full flows, pill positioning, and multi-tab notes.
+
 ### 5. Identity callback
 
 ```elixir
@@ -316,6 +355,12 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 
 ## Docs
 
+- [`docs/guides/headless-integration.md`](docs/guides/headless-integration.md)
+  — worked examples for `mode={:headless}` (header link, keyboard
+  shortcut, self-hosted assets)
+- [`docs/guides/on-demand-recording.md`](docs/guides/on-demand-recording.md)
+  — `recording={:on_demand}` trade-offs, `:float` and `:headless`
+  flows, pill positioning, multi-tab scope
 - [`docs/plans/README.md`](docs/plans/README.md) — forward-looking
   plan index (5f / 6)
 
