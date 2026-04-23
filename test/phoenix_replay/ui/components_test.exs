@@ -169,5 +169,28 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(href="/assets/phx_replay/phoenix_replay.css")
       assert html =~ ~s(src="/assets/phx_replay/phoenix_replay.js")
     end
+
+    test "position defaults to bottom_right" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-position="bottom_right")
+    end
+
+    test "position preset flows to data-position attr" do
+      for preset <- [:bottom_left, :top_right, :top_left] do
+        html =
+          render_component(&phoenix_replay_widget/1,
+            base_path: "/x",
+            csrf_token: "x",
+            position: preset
+          )
+
+        assert html =~ ~s(data-position="#{preset}")
+      end
+    end
   end
 end

@@ -26,3 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests all green.
 - Phase 1 styles: `priv/static/assets/phoenix_replay.css` — themeable
   via CSS custom properties (`--phx-replay-primary`, etc.).
+- `position` attr on `phoenix_replay_widget/1` with four corner presets
+  (`:bottom_right` default, `:bottom_left`, `:top_right`, `:top_left`).
+  Emitted to client JS via `data-position`; client appends a
+  `.phx-replay-toggle--<corner>` modifier class to the toggle button.
+- Position customization via CSS custom properties
+  (`--phx-replay-toggle-{bottom,right,top,left,z}`) on `.phx-replay-toggle`
+  or any ancestor. Preset modifier classes use `:where()` so host
+  overrides win without needing `!important`. Implements ADR-0001
+  Phase 1.

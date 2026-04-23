@@ -17,9 +17,16 @@
 
 .phx-replay-toggle {
   position: fixed;
-  bottom: 1rem;
-  right: 1rem;
-  z-index: 9999;
+  /* Position via CSS custom properties. Defaults produce bottom-right.
+   * Override at any level: `.phx-replay-toggle { --phx-replay-toggle-bottom: 5rem; }`
+   * or on an ancestor (inherited for the default position only — explicit
+   * position modifier classes set these directly).
+   */
+  bottom: var(--phx-replay-toggle-bottom, 1rem);
+  right:  var(--phx-replay-toggle-right,  1rem);
+  top:    var(--phx-replay-toggle-top,    auto);
+  left:   var(--phx-replay-toggle-left,   auto);
+  z-index: var(--phx-replay-toggle-z, 9999);
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -32,6 +39,28 @@
   font-size: 0.875rem;
   font-weight: 500;
   box-shadow: var(--phx-replay-shadow);
+}
+
+/* Position presets, wrapped in :where() so they contribute zero specificity.
+ * That way `.phx-replay-toggle { --phx-replay-toggle-top: 5rem; }` in a host
+ * stylesheet always wins — consumers never need !important to override a
+ * preset. `bottom-right` matches the base-class defaults, so no override rule.
+ */
+:where(.phx-replay-toggle--bottom-left) {
+  --phx-replay-toggle-right: auto;
+  --phx-replay-toggle-left:  1rem;
+}
+
+:where(.phx-replay-toggle--top-right) {
+  --phx-replay-toggle-bottom: auto;
+  --phx-replay-toggle-top:    1rem;
+}
+
+:where(.phx-replay-toggle--top-left) {
+  --phx-replay-toggle-bottom: auto;
+  --phx-replay-toggle-top:    1rem;
+  --phx-replay-toggle-right:  auto;
+  --phx-replay-toggle-left:   1rem;
 }
 
 .phx-replay-toggle:hover {

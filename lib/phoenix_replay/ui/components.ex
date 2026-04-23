@@ -58,6 +58,14 @@ defmodule PhoenixReplay.UI.Components do
     default: "Report issue",
     doc: "Label shown on the floating toggle button."
 
+  attr :position, :atom,
+    default: :bottom_right,
+    values: [:bottom_right, :bottom_left, :top_right, :top_left],
+    doc:
+      "Corner preset for the floating toggle button. Fine-tune via CSS " <>
+        "custom properties `--phx-replay-toggle-{bottom,right,top,left,z}` " <>
+        "on any ancestor or on `.phx-replay-toggle` directly."
+
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
     doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
@@ -97,6 +105,7 @@ defmodule PhoenixReplay.UI.Components do
       data-base-path={@base_path}
       data-csrf-token={@csrf_token}
       data-widget-text={@widget_text}
+      data-position={@position}
       {@rest}
     />
     """

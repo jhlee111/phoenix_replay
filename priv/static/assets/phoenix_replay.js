@@ -27,9 +27,12 @@
     csrfHeader: "x-csrf-token",
     // Widget UX.
     widgetText: "Report issue",
+    position: "bottom_right",
     severities: ["info", "low", "medium", "high", "critical"],
     defaultSeverity: "medium",
   };
+
+  const VALID_POSITIONS = new Set(["bottom_right", "bottom_left", "top_right", "top_left"]);
 
   // ---- transport ---------------------------------------------------------
 
@@ -221,8 +224,10 @@
   function renderWidget(mountEl, client, cfg) {
     const root = document.createElement("div");
     root.className = "phx-replay-widget";
+    const position = VALID_POSITIONS.has(cfg.position) ? cfg.position : "bottom_right";
+    const positionClass = `phx-replay-toggle--${position.replace(/_/g, "-")}`;
     root.innerHTML = `
-      <button type="button" class="phx-replay-toggle" aria-label="Report an issue">
+      <button type="button" class="phx-replay-toggle ${positionClass}" aria-label="Report an issue">
         <span aria-hidden="true">⚠︎</span>
         <span class="phx-replay-toggle-text">${cfg.widgetText}</span>
       </button>
@@ -312,6 +317,7 @@
           basePath: el.dataset.basePath,
           csrfToken: el.dataset.csrfToken,
           widgetText: el.dataset.widgetText,
+          position: el.dataset.position,
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));
       });
     },
