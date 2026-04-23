@@ -1,16 +1,17 @@
 # Plan: Session Continuity Across Page Loads — Implementation
 
-**Status**: Phase 1 shipped (2026-04-23, `044f250`); Phase 2
-implemented + smoked 2026-04-23 (pending commit)
+**Status**: Shipped — Phase 1 (`044f250`, 2026-04-23) and Phase 2
+(`87057aa`, 2026-04-23). Both phases smoke-tested in the
+`ash_feedback_demo` host; Phase 2 verified Registry-hit resume across
+navigation (same `session_id` + same pid + monotonic watermark) plus
+live `:event_batch` broadcasts received by an `iex` subscriber. Test
+suite: 48/48 green.
 **Started**: 2026-04-23
 **ADR**: [0003-session-continuity](../../decisions/0003-session-continuity.md)
 
-**Next**: commit Phase 2 to `phoenix_replay` (`mix test` green, 48
-tests; in-host smoke confirmed Registry-hit resume across navigation
-— same `session_id` + same pid + monotonically climbing watermark, plus
-live `:event_batch` broadcasts received by an `iex` subscriber).
-After the commit lands, this plan's Phase 1 shipped marker promotes to
-"Phases 1 + 2 shipped"; move to `completed/`.
+**Follow-ups** (separate plans): admin "watch live" LiveView,
+abandonment dashboard, JS test infra. See the **Follow-ups** section
+at the end of this plan.
 
 ## Overview
 

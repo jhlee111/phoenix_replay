@@ -9,11 +9,10 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
-| — | Session continuity across page loads (ADR-0003) | Phase 1 shipped (`044f250`); Phase 2 pending | [active/2026-04-23-session-continuity.md](active/2026-04-23-session-continuity.md) |
 | 5f | Igniter installer for `mix phoenix_replay.install` | proposed | [5f-igniter-installer.md](5f-igniter-installer.md) |
 | 6  | Hex publish | deferred | — |
 
-ADR-0003 (session continuity): Phase 1 shipped 2026-04-23 in `044f250` — client-side `sessionStorage` + `fetch(keepalive)` tail flush + `/session` resume branch + `Storage.resume_session/2` callback. Phase 2 (`PhoenixReplay.Session` GenServer + Registry + PubSub broadcasts + idle timeout) is the next workstream here.
+Open follow-ups (no plan file yet): admin "watch live" LiveView (consumer of the new ADR-0003 PubSub bus), session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3).
 
 ## Completed phases (historical)
 
@@ -27,3 +26,4 @@ ADR-0003 (session continuity): Phase 1 shipped 2026-04-23 in `044f250` — clien
 | 5a | Triage columns migration (consolidated into base install) | — |
 | — | Widget trigger UX — position preset + headless mode (ADR-0001) — see [completed plan](completed/2026-04-23-widget-trigger-ux.md) | 2026-04-23 |
 | — | On-demand recording ("Start Reproduction") — `recording={:on_demand}`, pill UI, panel state machine (ADR-0002); Phase 1 in `48d2c90`, Phase 2 in `3da8bfc` — see [completed plan](completed/2026-04-23-on-demand-recording.md) | 2026-04-23 |
+| — | Session continuity across page loads (ADR-0003); Phase 1 in `044f250` (client + minimal server), Phase 2 in `87057aa` (`PhoenixReplay.Session` GenServer + Registry + PubSub broadcasts + idle teardown) — see [completed plan](completed/2026-04-23-session-continuity.md) | 2026-04-23 |
