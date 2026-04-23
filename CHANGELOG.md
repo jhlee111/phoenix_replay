@@ -52,3 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (always-created, owns open/close) and `renderToggle` (only in
   `:float` mode). Enables the headless API and `open`/`close` hook
   without duplicating form logic.
+- `recording` attr on `phoenix_replay_widget/1` with two values:
+  `:continuous` (default, unchanged behavior — recorder starts at
+  mount) and `:on_demand` (recorder idle until explicit start).
+  Implements ADR-0002 Phase 1.
+- `window.PhoenixReplay.startRecording()` /
+  `window.PhoenixReplay.stopRecording()` /
+  `window.PhoenixReplay.resetRecording()` /
+  `window.PhoenixReplay.isRecording()` JS API. Delegate to the first
+  mounted widget. `startRecording()` returns a promise that rejects
+  on session-handshake failure so hosts can surface errors in their
+  own UI. `resetRecording()` drops the buffer + session and
+  restarts against a fresh session when recording is active.
+- Lazy session handshake for `recording={:on_demand}` — `/session`
+  fires on `startRecording()`, not at widget mount. Sessions that
+  never lead to a reproduction create no server state.
+- Internal refactor: the `createClient` factory in
+  `phoenix_replay.js` exposes `startRecording` / `stopRecording` /
+  `resetRecording` / `isRecording` alongside the legacy `start` /
+  `report` / `flush`. `start` now delegates to `startRecording` for
+  continuity; no breaking change for hosts calling it directly.

@@ -121,15 +121,35 @@ start/stop UX.
 
 ### DoD (Phase 1)
 
-- [ ] `recording` attr exists with two values + default
-- [ ] `data-recording` pass-through verified in component test
-- [ ] JS API (`startRecording` / `stopRecording` / `resetRecording` /
+- [x] `recording` attr exists with two values + default
+- [x] `data-recording` pass-through verified in component test
+- [x] JS API (`startRecording` / `stopRecording` / `resetRecording` /
       `isRecording`) accessible on `window.PhoenixReplay`
-- [ ] Lazy session handshake in `:on_demand` (no `/session` at mount)
-- [ ] Eager session handshake in `:continuous` unchanged
-- [ ] Manual smoke matrix above passes on dummy host
-- [ ] `asset_path={nil}` opt-out still works (no regression)
-- [ ] CHANGELOG unreleased entry
+- [x] Lazy session handshake in `:on_demand` (no `/session` at mount)
+- [x] Eager session handshake in `:continuous` unchanged
+- [x] Manual smoke matrix above passes on dummy host
+      (`ash_feedback_demo` → `/demo/continuous`, `/demo/on-demand-float`,
+      `/demo/on-demand-headless` — all 10 items green)
+- [x] `asset_path={nil}` opt-out still works (no regression)
+- [x] CHANGELOG unreleased entry
+
+### Smoke surfaced two bugs (fixed during Phase 1)
+
+- **Flush timer leak.** `stopRecording()` halted the recorder but left
+  the 5-second `setInterval` running; periodic no-op `/events` posts
+  continued (and occasionally raced with late rrweb cleanup emissions).
+  Fixed by adding `cancelFlushTimer()` and calling it from
+  `stopRecording` and `report`. `scheduleFlush()` is re-called by the
+  next `startRecording()` so the timer restarts cleanly.
+- **Session reuse on restart.** `startRecording()` after
+  `stopRecording()` reused the previous session token instead of
+  minting a new one, because `ensureSession()` is idempotent and
+  `stopRecording` didn't clear the token (intentionally — so a
+  `report()` between stop and start could still submit the drained
+  tail). Fixed by clearing `sessionToken` + `seq` at the top of
+  `startRecording`; the stopped session stays valid only until the
+  next start, and the abandoned tail is cleaned up by the server's
+  existing session TTL.
 
 ### Non-goals (Phase 1)
 
@@ -310,3 +330,15 @@ storage touches.
   real consumer case emerges — ADR-0002 explicitly out-of-scope
 - **Plan**: JS test infrastructure — rising relevance as JS surface
   grows (ADR-0001 already flagged this)
+- **Plan**: LiveView lifecycle compatibility audit — two pre-existing
+  concerns surfaced but deferred during Phase 1 smoke:
+  (a) `autoMount` only fires on `DOMContentLoaded`, so a
+  `push_navigate` to a route that re-renders the mount div won't
+  re-register the widget; root-layout integrations are unaffected
+  but per-LV-page widgets could be.
+  (b) The mount div has no `phx-update="ignore"`; the library's
+  injected DOM relies on LV's reconciler not touching children that
+  the template didn't declare. Works today but is an implicit
+  contract. Both apply equally to `:continuous` and `:on_demand` —
+  not a Phase 1 or Phase 2 blocker, but worth its own plan before
+  consumers hit the edge.

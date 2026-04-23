@@ -214,6 +214,27 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(data-mode="headless")
     end
 
+    test "recording defaults to continuous" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-recording="continuous")
+    end
+
+    test "recording={:on_demand} flows to data-recording attr" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          recording: :on_demand
+        )
+
+      assert html =~ ~s(data-recording="on_demand")
+    end
+
     test "asset_path={nil} suppresses stylesheet and script tags" do
       html =
         render_component(&phoenix_replay_widget/1,

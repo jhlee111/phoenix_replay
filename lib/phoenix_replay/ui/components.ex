@@ -75,6 +75,18 @@ defmodule PhoenixReplay.UI.Components do
         "`[data-phoenix-replay-trigger]` on any element or by calling " <>
         "`window.PhoenixReplay.open()` / `.close()`."
 
+  attr :recording, :atom,
+    default: :continuous,
+    values: [:continuous, :on_demand],
+    doc:
+      "`:continuous` (default) starts rrweb capture at widget mount and " <>
+        "flushes buffered events on submit — retroactive \"I already saw " <>
+        "the bug\" reports work. `:on_demand` keeps the recorder idle " <>
+        "until the user clicks Start in the panel (float mode) or the " <>
+        "host calls `window.PhoenixReplay.startRecording()` (headless). " <>
+        "Use `:on_demand` when explicit per-session consent or lower " <>
+        "runtime cost matters. See ADR-0002."
+
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
     doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
@@ -157,6 +169,7 @@ defmodule PhoenixReplay.UI.Components do
       data-widget-text={@widget_text}
       data-position={@position}
       data-mode={@mode}
+      data-recording={@recording}
       {@rest}
     />
     """

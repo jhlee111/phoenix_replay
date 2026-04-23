@@ -28,6 +28,7 @@
     // Widget UX.
     widgetText: "Report issue",
     position: "bottom_right",
+    recording: "continuous",
     severities: ["info", "low", "medium", "high", "critical"],
     defaultSeverity: "medium",
   };
@@ -90,7 +91,11 @@
 
   // ---- recorder lifecycle ------------------------------------------------
 
-  function startRecording({ buffer }) {
+  // Internal helper. The public `client.startRecording()` is a method on
+  // the object returned by `createClient` below — it handles session
+  // handshake, state flagging, and the flush timer. This helper just
+  // wires rrweb into the provided buffer.
+  function createRecorder({ buffer }) {
     if (!global.rrweb || !global.rrweb.record) {
       console.warn("[PhoenixReplay] rrweb not loaded; recording disabled. Metadata-only reports still work.");
       return { stop: () => {} };
@@ -133,8 +138,13 @@
     let seq = 0;
     let flushTimer = null;
     let recorder = null;
+    let recording = false;
 
-    async function startSession() {
+    // Idempotent: a no-op when a session token is already held. On-demand
+    // mode leans on this — the session handshake waits until the user
+    // clicks Start (via startRecording), not widget mount.
+    async function ensureSession() {
+      if (sessionToken) return;
       const res = await postJson(`${basePath}${cfg.sessionPath}`, {}, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
@@ -165,7 +175,7 @@
           if (err instanceof PhoenixReplayError && (err.status === 410 || err.status === 401)) {
             // Session expired / unauthorized → mint a fresh token; drop these events.
             sessionToken = null;
-            await startSession().catch(() => {});
+            await ensureSession().catch(() => {});
             return;
           }
           console.warn("[PhoenixReplay] flush failed:", err.message);
@@ -187,10 +197,62 @@
       }, cfg.flushIntervalMs);
     }
 
-    async function start() {
-      await startSession();
-      recorder = startRecording({ buffer });
+    function cancelFlushTimer() {
+      if (!flushTimer) return;
+      clearInterval(flushTimer);
+      flushTimer = null;
+    }
+
+    async function startRecording() {
+      if (recording) return;
+      // Each recording gets a fresh session token. A prior stopRecording
+      // left the previous token alive so a subsequent report() could still
+      // submit the drained tail; if the host is instead beginning a new
+      // reproduction, that tail is abandoned and we mint a new session.
+      sessionToken = null;
+      seq = 0;
+      await ensureSession();
+      recorder = createRecorder({ buffer });
+      recording = true;
       scheduleFlush();
+    }
+
+    async function stopRecording() {
+      if (!recording) return;
+      recorder?.stop?.();
+      recorder = null;
+      recording = false;
+      // Stop the periodic flush before the final drain — otherwise the
+      // timer keeps firing no-op `/events` posts (and occasionally racing
+      // with late rrweb cleanup emissions) after we've torn down.
+      cancelFlushTimer();
+      await flush();
+    }
+
+    async function resetRecording() {
+      // Per ADR-0002 OQ5: on-demand idle → no-op. Currently recording
+      // (either mode) → stop cleanly, drop buffered events + session,
+      // then start fresh.
+      if (!recording) return;
+      recorder?.stop?.();
+      recorder = null;
+      recording = false;
+      buffer.drain();
+      sessionToken = null;
+      seq = 0;
+      await startRecording();
+    }
+
+    function isRecording() {
+      return recording;
+    }
+
+    // Legacy public: unchanged shape. `start()` used to combine session
+    // handshake + recorder + flush timer. All three now live inside
+    // `startRecording`; keeping `start` as an alias avoids a breaking
+    // change for any host that calls it directly.
+    async function start() {
+      await startRecording();
     }
 
     async function report({ description, severity, metadata = {}, jamLink = null }) {
@@ -210,13 +272,33 @@
         tokenHeader: cfg.tokenHeader,
       });
 
-      // Start a fresh session so the next report doesn't share buffer/seq.
-      recorder?.stop?.();
-      recorder = startRecording({ buffer });
-      await startSession().catch(() => {});
+      // Tear down the current session. Continuous mode spins up a fresh
+      // one immediately so the next report doesn't share buffer/seq.
+      // On-demand mode returns to idle — the user starts the next
+      // reproduction explicitly.
+      if (recording) {
+        recorder?.stop?.();
+        recorder = null;
+        recording = false;
+      }
+      cancelFlushTimer();
+      sessionToken = null;
+      seq = 0;
+      if (cfg.recording !== "on_demand") {
+        await startRecording().catch(() => {});
+      }
     }
 
-    return { start, report, flush, _internals: { buffer } };
+    return {
+      start,
+      report,
+      flush,
+      startRecording,
+      stopRecording,
+      resetRecording,
+      isRecording,
+      _internals: { buffer },
+    };
   }
 
   // ---- widget UI ---------------------------------------------------------
@@ -334,7 +416,7 @@
         console.warn("[PhoenixReplay] trigger clicked but no widget is mounted");
         return;
       }
-      inst.open();
+      inst.panel.open();
     });
   }
 
@@ -350,7 +432,7 @@
       if (mode === "float") {
         renderToggle(panel.root, cfg, panel);
       }
-      instances.set(cfg.mount, panel);
+      instances.set(cfg.mount, { panel, client });
       if (instances.size > 1) {
         console.warn(
           "[PhoenixReplay] multiple widget instances detected; " +
@@ -358,7 +440,12 @@
         );
       }
       installTriggerListener();
-      await client.start();
+      // Continuous mode starts recording (and the session handshake) at
+      // mount as today. On-demand waits for an explicit
+      // `startRecording()` call.
+      if (cfg.recording !== "on_demand") {
+        await client.start();
+      }
       return client;
     },
 
@@ -366,14 +453,47 @@
     // items, keyboard shortcuts, etc. No-op if no widget is mounted.
     open() {
       const inst = firstInstance();
-      if (inst) inst.open();
+      if (inst) inst.panel.open();
     },
 
     // Close the first mounted panel. Usable from host JS after triggering
     // submit programmatically or canceling a flow.
     close() {
       const inst = firstInstance();
-      if (inst) inst.close();
+      if (inst) inst.panel.close();
+    },
+
+    // Begin rrweb capture on the first mounted instance. No-op if
+    // recording is already active. In `:continuous` mode the recorder
+    // starts at mount, so this is a no-op there — use in `:on_demand`
+    // to begin a reproduction. Returns a promise that rejects on session
+    // handshake failure; callers can surface that in the UI.
+    startRecording() {
+      const inst = firstInstance();
+      return inst ? inst.client.startRecording() : Promise.resolve();
+    },
+
+    // Halt rrweb capture and flush the tail of the buffer. The session
+    // stays live so a subsequent submit carries the captured events.
+    // No-op if not currently recording.
+    stopRecording() {
+      const inst = firstInstance();
+      return inst ? inst.client.stopRecording() : Promise.resolve();
+    },
+
+    // Drop the current buffer and session, then restart recording
+    // against a fresh session. No-op if not currently recording. Useful
+    // in `:continuous` when the host wants to discard accumulated noise
+    // and capture only the next window.
+    resetRecording() {
+      const inst = firstInstance();
+      return inst ? inst.client.resetRecording() : Promise.resolve();
+    },
+
+    // Whether the first mounted instance is currently capturing events.
+    isRecording() {
+      const inst = firstInstance();
+      return inst ? inst.client.isRecording() : false;
     },
 
     // Auto-mount helper: finds elements with [data-phoenix-replay] and
@@ -391,6 +511,7 @@
           widgetText: el.dataset.widgetText,
           position: el.dataset.position,
           mode: el.dataset.mode,
+          recording: el.dataset.recording,
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));
       });
     },
