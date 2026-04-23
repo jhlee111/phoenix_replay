@@ -1,9 +1,10 @@
 # Plan: Widget Trigger UX — Implementation
 
-**Status**: active
+**Status**: completed
 **Started**: 2026-04-23
+**Completed**: 2026-04-23
 **ADR**: [0001-widget-trigger-ux](../../decisions/0001-widget-trigger-ux.md)
-**Est**: Phase 1 ~2h · Phase 2 ~4–6h · Docs ~1h
+**Shipped in**: `0a1df5a` (Phase 1) · `eef2496` (Phase 2) · `3296106` (docs)
 
 ## Overview
 
