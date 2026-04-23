@@ -190,6 +190,72 @@ plug Plug.Static,
 
 The widget auto-mounts on `DOMContentLoaded` — no JS glue required.
 
+### 4a. Moving the toggle button
+
+The default `:bottom_right` corner often collides with existing chat
+widgets (Intercom / Crisp) or the LiveView debugger pill in dev. Pick
+another corner with the `position` preset attr:
+
+```heex
+<PhoenixReplay.UI.Components.phoenix_replay_widget
+  base_path="/api/feedback"
+  csrf_token={get_csrf_token()}
+  position={:bottom_left}
+/>
+```
+
+Valid values: `:bottom_right` (default), `:bottom_left`, `:top_right`,
+`:top_left`.
+
+For offsets other than the four corners, use the CSS custom
+properties exposed on `.phx-replay-toggle` in a host stylesheet
+loaded after the library's:
+
+```css
+.phx-replay-toggle {
+  --phx-replay-toggle-bottom: 5rem;  /* above a footer bar */
+  --phx-replay-toggle-right:  2rem;
+  /* also available: --phx-replay-toggle-top, --phx-replay-toggle-left,
+     --phx-replay-toggle-z */
+}
+```
+
+The preset classes are wrapped in `:where()`, so a host override on
+`.phx-replay-toggle` always wins — no `!important` needed.
+
+### 4b. Headless mode — bring your own trigger
+
+Add the widget with `mode={:headless}` to skip the floating button
+entirely. The panel still renders; your code decides when to open it.
+
+```heex
+<PhoenixReplay.UI.Components.phoenix_replay_widget
+  base_path="/api/feedback"
+  csrf_token={get_csrf_token()}
+  mode={:headless}
+/>
+
+<button data-phoenix-replay-trigger>Report a bug</button>
+```
+
+Any element carrying the `data-phoenix-replay-trigger` attribute opens
+the panel when clicked. The listener is delegated at the document
+level, so dropdown items, LiveView-patched DOM, and dynamically
+inserted triggers all work without re-binding.
+
+For programmatic control — keyboard shortcuts, "something went wrong"
+modals that prompt a bug report, etc. — call the global API from your
+JS:
+
+```js
+window.PhoenixReplay.open();
+window.PhoenixReplay.close();
+```
+
+See [`docs/guides/headless-integration.md`](docs/guides/headless-integration.md)
+for worked examples (header link, keyboard shortcut, self-hosted
+assets).
+
 ### 5. Identity callback
 
 ```elixir

@@ -104,6 +104,44 @@ defmodule PhoenixReplay.UI.Components do
   Emits a hidden `<div data-phoenix-replay>` with all configuration on
   data-attributes. The included `phoenix_replay.js` auto-mounts on
   DOMContentLoaded.
+
+  ## Customizing the trigger
+
+  The default `:float` mode renders a floating toggle button in the
+  bottom-right corner. Move it with the `position` preset attr:
+
+      <.phoenix_replay_widget
+        base_path="/api/feedback"
+        csrf_token={get_csrf_token()}
+        position={:bottom_left}
+      />
+
+  Fine-tune via CSS custom properties in a host stylesheet loaded after
+  the library CSS:
+
+      .phx-replay-toggle {
+        --phx-replay-toggle-bottom: 5rem; /* push above a footer bar */
+      }
+
+  To hide the floating button entirely and wire your own trigger — a
+  header link, a dropdown menu item, a keyboard shortcut, etc. — use
+  `:headless` mode:
+
+      <.phoenix_replay_widget
+        base_path="/api/feedback"
+        csrf_token={get_csrf_token()}
+        mode={:headless}
+      />
+
+      <button data-phoenix-replay-trigger>Report a bug</button>
+
+  Any element with `[data-phoenix-replay-trigger]` opens the panel when
+  clicked (including elements added to the DOM after page load — the
+  click listener is delegated at the document level). For programmatic
+  control, call `window.PhoenixReplay.open()` and
+  `window.PhoenixReplay.close()` from your JS. See the
+  [Headless integration guide](guides/headless-integration.html) for
+  worked examples.
   """
   def phoenix_replay_widget(assigns) do
     ~H"""
