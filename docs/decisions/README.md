@@ -7,6 +7,7 @@
 | [0001](./0001-widget-trigger-ux.md) | Widget Trigger UX — Float Default + Headless Mode | Accepted | 2026-04-23 |
 | [0002](./0002-on-demand-recording.md) | On-Demand Recording Mode — "Start Reproduction" | Accepted | 2026-04-23 |
 | [0003](./0003-session-continuity.md) | Session Continuity Across Page Loads | Accepted | 2026-04-23 |
+| [0004](./0004-live-session-watch.md) | Live Session Watch — Admin "Shoulder-Surf" | Proposed | 2026-04-23 |
 
 ## Rules
 
