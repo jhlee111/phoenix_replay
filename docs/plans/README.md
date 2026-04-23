@@ -9,12 +9,13 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
+| — | On-demand recording mode ("Start Reproduction") | ready — ADR-0002 accepted | [active/2026-04-23-on-demand-recording.md](active/2026-04-23-on-demand-recording.md) |
 | 5f | Igniter installer for `mix phoenix_replay.install` | proposed | [5f-igniter-installer.md](5f-igniter-installer.md) |
 | 6  | Hex publish | deferred | — |
 
-**Next candidate (no plan yet)**: on-demand recording mode (Jam-style
-"start reproduction") — spec'd as a follow-up in ADR-0001. Needs its
-own ADR (0002 candidate) and plan before work starts.
+ADR-0002 (on-demand recording) is accepted; the plan has two
+independently-shippable phases — Phase 1 is the JS lifecycle refactor
++ `recording` attr, Phase 2 is the pill UI + float-mode flow.
 
 ## Completed phases (historical)
 

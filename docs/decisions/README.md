@@ -5,6 +5,7 @@
 | # | Title | Status | Date |
 |---|-------|--------|------|
 | [0001](./0001-widget-trigger-ux.md) | Widget Trigger UX — Float Default + Headless Mode | Accepted | 2026-04-23 |
+| [0002](./0002-on-demand-recording.md) | On-Demand Recording Mode — "Start Reproduction" | Accepted | 2026-04-23 |
 
 ## Rules
 
