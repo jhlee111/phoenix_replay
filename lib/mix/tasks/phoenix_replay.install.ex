@@ -50,6 +50,20 @@ if Code.ensure_loaded?(Igniter) do
       |> patch_router()
       |> patch_endpoint()
       |> inject_widget_into_root_layout()
+      |> generate_identify_stub()
+      |> generate_migration()
+      |> Igniter.add_notice("""
+
+      phoenix_replay install complete. Two TODOs to finish before booting:
+
+        1. config/config.exs: replace REPLACE_ME_WITH_A_RANDOM_SECRET with a
+           real `:session_token_secret` (e.g. `System.fetch_env!(...)`).
+        2. lib/<app>/feedback/identify.ex: implement `fetch_identity/1`
+           against your auth (default returns `:anonymous`).
+
+      Then run `mix ecto.migrate` and flip `widget_enabled: true` in
+      config to start capturing.
+      """)
     end
 
     defp configure_phoenix_replay(igniter) do
@@ -327,6 +341,126 @@ if Code.ensure_loaded?(Igniter) do
       />
     <% end %>
     """
+
+    # --- Identify stub ----------------------------------------------
+
+    defp generate_identify_stub(igniter) do
+      app_name = Igniter.Project.Application.app_name(igniter)
+      host_module = host_module_alias(app_name)
+      identify_module = Module.concat([host_module, "Feedback", "Identify"])
+
+      case Igniter.Project.Module.module_exists(igniter, identify_module) do
+        {true, igniter} -> igniter
+        {false, igniter} -> create_identify_stub(igniter, identify_module)
+      end
+    end
+
+    defp create_identify_stub(igniter, identify_module) do
+      Igniter.Project.Module.create_module(igniter, identify_module, """
+      @moduledoc \"\"\"
+      Stub identity + metadata callback for phoenix_replay.
+
+      `phoenix_replay` calls `fetch_identity/1` on every `POST /session`
+      to resolve the acting user (or anonymous) and `fetch_metadata/1`
+      on `POST /submit` to attach host context to the feedback row.
+      Both receive the `Plug.Conn` and return what the callbacks expect.
+
+      Replace the bodies below with real lookups against your auth /
+      tenancy / session.
+      \"\"\"
+
+      @doc \"\"\"
+      Resolve the acting identity for a session token request. Return
+      either a map shaped
+      `%{kind: :user | :api_key | :anonymous, id: String.t() | nil, attrs: map()}`
+      or `nil` to reject the request with 401.
+      \"\"\"
+      @spec fetch_identity(Plug.Conn.t()) :: map() | nil
+      def fetch_identity(_conn) do
+        # TODO: replace with a real lookup. Common shapes:
+        #
+        #   case MyApp.Auth.current_user(conn) do
+        #     %User{} = u -> %{kind: :user, id: to_string(u.id), attrs: %{email: u.email}}
+        #     nil         -> %{kind: :anonymous, id: nil, attrs: %{}}
+        #   end
+        %{kind: :anonymous, id: nil, attrs: %{}}
+      end
+
+      @doc \"\"\"
+      Return host metadata to attach to a feedback submission. Must be
+      a map with string keys so JSONB serialization round-trips
+      cleanly.
+      \"\"\"
+      @spec fetch_metadata(Plug.Conn.t()) :: map()
+      def fetch_metadata(_conn) do
+        # TODO: enrich with build SHA, environment, request id, etc.
+        %{}
+      end
+      """)
+    end
+
+    # --- Migration copy ---------------------------------------------
+
+    defp generate_migration(igniter) do
+      app_name = Igniter.Project.Application.app_name(igniter)
+      host_module = host_module_alias(app_name)
+      repo_module = Module.concat([host_module, "Repo"])
+      migrations_dir = "priv/repo/migrations"
+      target_filename = "create_phoenix_replay_tables.exs"
+
+      existing_path =
+        igniter.rewrite.sources
+        |> Map.keys()
+        |> Enum.find(&String.ends_with?(&1, "_" <> target_filename))
+
+      cond do
+        existing_path && timestamped_under?(existing_path, migrations_dir) ->
+          igniter
+
+        File.exists?(migrations_dir) and migration_already_on_disk?(migrations_dir, target_filename) ->
+          igniter
+
+        true ->
+          timestamp = migration_timestamp()
+          target_path = Path.join(migrations_dir, "#{timestamp}_#{target_filename}")
+          migration_module = Module.concat([repo_module, Migrations, "CreatePhoenixReplayTables"])
+
+          template_path =
+            :phoenix_replay
+            |> Application.app_dir(
+              "priv/templates/phoenix_replay.install/migrations/create_phoenix_replay_tables.ex"
+            )
+
+          contents =
+            template_path
+            |> File.read!()
+            |> EEx.eval_string(assigns: [module: migration_module])
+
+          Igniter.create_new_file(igniter, target_path, contents)
+      end
+    end
+
+    defp timestamped_under?(path, dir) do
+      String.starts_with?(path, dir <> "/") and
+        Regex.match?(~r/^\d{14}_/, Path.basename(path))
+    end
+
+    defp migration_already_on_disk?(dir, target_filename) do
+      case File.ls(dir) do
+        {:ok, files} ->
+          Enum.any?(files, &String.ends_with?(&1, "_" <> target_filename))
+
+        _ ->
+          false
+      end
+    end
+
+    defp migration_timestamp do
+      {{y, m, d}, {h, mi, s}} = :calendar.universal_time()
+
+      :io_lib.format("~4..0B~2..0B~2..0B~2..0B~2..0B~2..0B", [y, m, d, h, mi, s])
+      |> IO.iodata_to_binary()
+    end
 
     defp inject_widget_into_root_layout(igniter) do
       app_name = Igniter.Project.Application.app_name(igniter)

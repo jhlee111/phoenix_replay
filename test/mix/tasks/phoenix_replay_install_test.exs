@@ -186,4 +186,81 @@ defmodule Mix.Tasks.PhoenixReplay.InstallTest do
       assert_unchanged(second, @layout_path)
     end
   end
+
+  describe "Identify stub generator" do
+    test "creates HostApp.Feedback.Identify with fetch_identity/1 + fetch_metadata/1" do
+      igniter =
+        test_project(app_name: :test_app)
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      identify_path = "lib/test_app/feedback/identify.ex"
+
+      content =
+        igniter.rewrite
+        |> Rewrite.source!(identify_path)
+        |> Rewrite.Source.get(:content)
+
+      assert content =~ "defmodule TestApp.Feedback.Identify"
+      assert content =~ "def fetch_identity"
+      assert content =~ "def fetch_metadata"
+      assert content =~ ":anonymous"
+    end
+
+    test "is idempotent — re-running doesn't re-create the stub" do
+      first =
+        test_project(app_name: :test_app)
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      second = Igniter.compose_task(first, "phoenix_replay.install", [])
+      assert_unchanged(second, "lib/test_app/feedback/identify.ex")
+    end
+  end
+
+  describe "migration generator" do
+    test "creates the create_phoenix_replay_tables migration" do
+      igniter =
+        test_project(app_name: :test_app)
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      migration_path =
+        igniter.rewrite.sources
+        |> Map.keys()
+        |> Enum.find(&String.ends_with?(&1, "_create_phoenix_replay_tables.exs"))
+
+      assert migration_path,
+             "expected a *_create_phoenix_replay_tables.exs migration to be generated"
+
+      content =
+        igniter.rewrite
+        |> Rewrite.source!(migration_path)
+        |> Rewrite.Source.get(:content)
+
+      assert content =~ "defmodule TestApp.Repo.Migrations.CreatePhoenixReplayTables"
+      assert content =~ "create table(:phoenix_replay_feedbacks"
+      assert content =~ "create table(:phoenix_replay_events"
+      assert content =~ "create table(:phoenix_replay_feedback_comments"
+    end
+
+    test "is idempotent — re-running over its own output adds no new migration" do
+      first =
+        test_project(app_name: :test_app)
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      first_paths = first.rewrite.sources |> Map.keys() |> Enum.sort()
+
+      second =
+        first
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      second_paths = second.rewrite.sources |> Map.keys() |> Enum.sort()
+
+      assert first_paths == second_paths,
+             "second run added or removed files: #{inspect(second_paths -- first_paths)}"
+    end
+  end
 end

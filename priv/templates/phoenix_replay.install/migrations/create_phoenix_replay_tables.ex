@@ -1,4 +1,4 @@
-defmodule <%= @module %> do
+defmodule <%= inspect(@module) %> do
   use Ecto.Migration
 
   def change do
