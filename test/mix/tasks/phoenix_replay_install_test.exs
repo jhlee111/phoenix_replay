@@ -101,4 +101,89 @@ defmodule Mix.Tasks.PhoenixReplay.InstallTest do
       assert_unchanged(second, @router_path)
     end
   end
+
+  describe "endpoint patcher" do
+    @endpoint_path "lib/test_app_web/endpoint.ex"
+    @endpoint_module """
+    defmodule TestAppWeb.Endpoint do
+      use Phoenix.Endpoint, otp_app: :test_app
+
+      plug Plug.Static,
+        at: "/",
+        from: :test_app,
+        gzip: false,
+        only: ~w(assets)
+
+      plug TestAppWeb.Router
+    end
+    """
+
+    test "adds Plug.Static for /phoenix_replay on a fresh endpoint" do
+      igniter =
+        test_project(app_name: :test_app, files: %{@endpoint_path => @endpoint_module})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      content =
+        igniter.rewrite
+        |> Rewrite.source!(@endpoint_path)
+        |> Rewrite.Source.get(:content)
+
+      assert content =~ ~s|at: "/phoenix_replay"|
+      assert content =~ ":phoenix_replay"
+    end
+
+    test "is idempotent — re-running leaves the endpoint alone" do
+      first =
+        test_project(app_name: :test_app, files: %{@endpoint_path => @endpoint_module})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      second = Igniter.compose_task(first, "phoenix_replay.install", [])
+      assert_unchanged(second, @endpoint_path)
+    end
+  end
+
+  describe "root layout widget injection" do
+    @layout_path "lib/test_app_web/components/layouts/root.html.heex"
+    @layout_html """
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Test</title>
+      </head>
+      <body>
+        {@inner_content}
+      </body>
+    </html>
+    """
+
+    test "injects the widget snippet before </body>" do
+      igniter =
+        test_project(app_name: :test_app, files: %{@layout_path => @layout_html})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      content =
+        igniter.rewrite
+        |> Rewrite.source!(@layout_path)
+        |> Rewrite.Source.get(:content)
+
+      assert content =~ "phoenix_replay widget"
+      assert content =~ "PhoenixReplay.UI.Components.phoenix_replay_widget"
+      assert content =~ ":widget_enabled"
+      # Snippet appears before the closing tag — order check.
+      assert String.split(content, "</body>") |> hd() =~ "phoenix_replay widget"
+    end
+
+    test "is idempotent — re-running leaves the layout alone" do
+      first =
+        test_project(app_name: :test_app, files: %{@layout_path => @layout_html})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      second = Igniter.compose_task(first, "phoenix_replay.install", [])
+      assert_unchanged(second, @layout_path)
+    end
+  end
 end

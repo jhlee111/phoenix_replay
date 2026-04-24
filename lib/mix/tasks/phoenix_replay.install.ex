@@ -48,6 +48,8 @@ if Code.ensure_loaded?(Igniter) do
       igniter
       |> configure_phoenix_replay()
       |> patch_router()
+      |> patch_endpoint()
+      |> inject_widget_into_root_layout()
     end
 
     defp configure_phoenix_replay(igniter) do
@@ -241,6 +243,139 @@ if Code.ensure_loaded?(Igniter) do
 
     defp scope_arg_for(:feedback_routes), do: "/api/feedback"
     defp scope_arg_for(:admin_routes), do: "/feedback"
+
+    # --- Endpoint patcher -------------------------------------------
+
+    defp patch_endpoint(igniter) do
+      {igniter, endpoint} = Igniter.Libs.Phoenix.select_endpoint(igniter)
+
+      if endpoint do
+        Igniter.Project.Module.find_and_update_module!(igniter, endpoint, fn zipper ->
+          if phoenix_replay_static_present?(zipper) do
+            {:ok, zipper}
+          else
+            # Place the new Plug.Static immediately after `use
+            # Phoenix.Endpoint`. Order vs. the host's existing
+            # `Plug.Static, at: "/"` doesn't matter for routing
+            # (different `at:` prefix) but earlier-in-pipeline plays
+            # well with admin tools that probe early.
+            case Igniter.Code.Common.move_to(zipper, &use_phoenix_endpoint?/1) do
+              {:ok, use_zipper} ->
+                {:ok,
+                 Igniter.Code.Common.add_code(
+                   use_zipper,
+                   ~s|plug Plug.Static, at: "/phoenix_replay", from: {:phoenix_replay, "priv/static/assets"}|,
+                   placement: :after
+                 )}
+
+              :error ->
+                {:warning,
+                 "Could not find `use Phoenix.Endpoint` in #{inspect(endpoint)}. " <>
+                   "Add the Plug.Static line manually."}
+            end
+          end
+        end)
+      else
+        Igniter.add_warning(igniter, """
+        No Phoenix endpoint found. Add the following to your endpoint module:
+
+            plug Plug.Static,
+              at: "/phoenix_replay",
+              from: {:phoenix_replay, "priv/static/assets"}
+        """)
+      end
+    end
+
+    defp phoenix_replay_static_present?(zipper) do
+      case Igniter.Code.Common.move_to(zipper, fn z ->
+             Igniter.Code.Function.function_call?(z, :plug, 2) and
+               Igniter.Code.Function.argument_equals?(z, 0, Plug.Static) and
+               static_args_match_phoenix_replay?(z)
+           end) do
+        {:ok, _} -> true
+        _ -> false
+      end
+    end
+
+    defp static_args_match_phoenix_replay?(zipper) do
+      case Igniter.Code.Function.move_to_nth_argument(zipper, 1) do
+        {:ok, arg_zipper} ->
+          arg_zipper
+          |> Sourceror.Zipper.node()
+          |> Macro.to_string()
+          |> String.contains?(":phoenix_replay")
+
+        _ ->
+          false
+      end
+    end
+
+    defp use_phoenix_endpoint?(zipper) do
+      Igniter.Code.Function.function_call?(zipper, :use, 2) and
+        Igniter.Code.Function.argument_equals?(zipper, 0, Phoenix.Endpoint)
+    end
+
+    # --- Root layout widget injection -------------------------------
+
+    @widget_marker "<%!-- phoenix_replay widget --%>"
+    @widget_snippet """
+    <%!-- phoenix_replay widget --%>
+    <%= if Application.get_env(:phoenix_replay, :widget_enabled, false) do %>
+      <PhoenixReplay.UI.Components.phoenix_replay_widget
+        base_path="/api/feedback"
+        csrf_token={get_csrf_token()}
+      />
+    <% end %>
+    """
+
+    defp inject_widget_into_root_layout(igniter) do
+      app_name = Igniter.Project.Application.app_name(igniter)
+      web_module_under = "#{app_name}_web"
+      layout_path = Path.join(["lib", web_module_under, "components/layouts/root.html.heex"])
+
+      cond do
+        Igniter.exists?(igniter, layout_path) ->
+          igniter = Igniter.include_glob(igniter, layout_path)
+          source = Rewrite.source!(igniter.rewrite, layout_path)
+          content = Rewrite.Source.get(source, :content)
+
+          cond do
+            String.contains?(content, @widget_marker) ->
+              igniter
+
+            String.contains?(content, "</body>") ->
+              new_content =
+                String.replace(content, "</body>", @widget_snippet <> "</body>", global: false)
+
+              new_source = Rewrite.Source.update(source, :content, new_content)
+              %{igniter | rewrite: Rewrite.update!(igniter.rewrite, new_source)}
+
+            true ->
+              Igniter.add_notice(igniter, """
+              Could not find a `</body>` tag in #{layout_path}. Paste the widget
+              snippet manually before your closing </body>:
+
+              #{@widget_snippet}
+
+              Then enable it in config:
+
+                  config :phoenix_replay, widget_enabled: true
+              """)
+          end
+
+        true ->
+          Igniter.add_notice(igniter, """
+          Could not find #{layout_path}. The phoenix_replay widget needs to live in
+          your root layout. Paste this snippet before </body>:
+
+          #{@widget_snippet}
+
+          Then enable it in config:
+
+              config :phoenix_replay, widget_enabled: true
+          """)
+      end
+    end
   end
 else
   defmodule Mix.Tasks.PhoenixReplay.Install do
