@@ -9,16 +9,11 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
+| — | Live session watch — admin "shoulder-surf" LV (ADR-0004) | active — Phase 1 | [active/live-session-watch.md](active/live-session-watch.md) |
 | 5f | Igniter installer for `mix phoenix_replay.install` | proposed | [5f-igniter-installer.md](5f-igniter-installer.md) |
 | 6  | Hex publish | deferred | — |
 
 Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4).
-
-## Proposals (drafted, not yet committed)
-
-| Proposal | Depends on | File |
-|----------|------------|------|
-| Live session watch — admin "shoulder-surf" LV (ADR-0004) | ADR-0004 acceptance | [proposals/live-session-watch.md](proposals/live-session-watch.md) |
 
 ## Completed phases (historical)
 

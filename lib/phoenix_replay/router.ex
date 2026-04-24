@@ -70,4 +70,40 @@ defmodule PhoenixReplay.Router do
       _ = opts
     end
   end
+
+  @doc """
+  Mounts the admin LiveView routes at `path`. Requires a `:browser`
+  pipeline (or equivalent) — LiveViews speak Phoenix's browser session
+  + LV websocket protocol. Intended for an admin scope whose
+  `pipe_through` already enforces access.
+
+  ## Routes
+
+    * `GET :path/:id/live` → `PhoenixReplay.Live.SessionWatch`
+      Live-stream an in-flight session's rrweb frames into
+      rrweb-player as they arrive (ADR-0004 Phase 1). Path param
+      `:id` is the `session_id`.
+
+  ## Example
+
+      scope "/admin", AshFeedbackDemoWeb do
+        pipe_through [:browser, :require_admin]
+        live_session :phoenix_replay_admin do
+          phoenix_replay_live_routes "/sessions"
+        end
+      end
+
+  Host must also mount `Plug.Static` for `/phoenix_replay` assets and
+  emit `<.phoenix_replay_admin_assets />` in the layout so the
+  player_hook JS is available on the page.
+  """
+  defmacro phoenix_replay_live_routes(path, opts \\ []) do
+    quote bind_quoted: [path: path, opts: opts] do
+      scope path, alias: false do
+        live "/:id/live", PhoenixReplay.Live.SessionWatch, :watch
+      end
+
+      _ = opts
+    end
+  end
 end

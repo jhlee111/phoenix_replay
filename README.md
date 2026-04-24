@@ -352,7 +352,27 @@ Each in-flight session is owned by a `PhoenixReplay.Session` GenServer
 
 A live admin LiveView can subscribe and stream rrweb frames into
 `rrweb-player` as they land, or render a "session abandoned" timeline
-without polling:
+without polling.
+
+**Batteries included — just mount the route.** `PhoenixReplay.Live.SessionWatch`
+is a ready-to-use LV that does exactly this. Mount via the router
+macro from an admin-authenticated scope:
+
+```elixir
+scope "/admin", MyAppWeb do
+  pipe_through [:browser, :require_admin]
+  phoenix_replay_live_routes "/replay/sessions"
+end
+```
+
+An admin can then open
+`/admin/replay/sessions/<session_id>/live` to watch the recording
+stream into rrweb-player in real time — catch-up on mount plus live
+appends as they arrive. Overlay banner renders on
+`:session_closed` / `:session_abandoned`. See ADR-0004 for the
+full design.
+
+To build a bespoke surface instead, consume the PubSub bus directly:
 
 ```elixir
 @impl true

@@ -130,6 +130,34 @@ defmodule PhoenixReplay.Session do
     end
   end
 
+  @doc """
+  Returns the historical event stream plus the current `seq_watermark`
+  for a running session, serialized against in-flight appends. Used by
+  the live watch LV at mount time to seed the player with catch-up
+  frames without racing against newly-arriving `:event_batch`
+  broadcasts — any broadcast with `seq <= watermark` from the returned
+  pair is already in the returned events; later seqs are strictly new.
+
+  Falls back to `Storage.Dispatch.fetch_events/1` when no Session
+  process is registered (the session has already closed or been
+  abandoned). In that case returns `{:ok, events, :infinity}` — no
+  further broadcasts will arrive, so the dedup watermark is moot.
+  """
+  @spec catchup(String.t()) ::
+          {:ok, [map()], non_neg_integer() | :infinity} | {:error, term()}
+  def catchup(session_id) when is_binary(session_id) do
+    case Registry.lookup(PhoenixReplay.SessionRegistry, session_id) do
+      [{pid, _}] ->
+        GenServer.call(pid, :catchup)
+
+      [] ->
+        case Dispatch.fetch_events(session_id) do
+          {:ok, events} -> {:ok, events, :infinity}
+          {:error, _} = err -> err
+        end
+    end
+  end
+
   @doc false
   def via(session_id), do: {:via, Registry, {PhoenixReplay.SessionRegistry, session_id}}
 
@@ -209,6 +237,14 @@ defmodule PhoenixReplay.Session do
     cancel_idle(state)
     broadcast(state, {:session_closed, state.session_id, reason})
     {:stop, :normal, :ok, state}
+  end
+
+  @impl true
+  def handle_call(:catchup, _from, state) do
+    case Dispatch.fetch_events(state.session_id) do
+      {:ok, events} -> {:reply, {:ok, events, state.seq_watermark}, state}
+      {:error, _} = err -> {:reply, err, state}
+    end
   end
 
   @impl true

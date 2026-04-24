@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Live session watch — Phase 1 (ADR-0004). `PhoenixReplay.Live.SessionWatch`
+  LiveView streams an in-flight recording into rrweb-player in real
+  time. On mount: catch up from the persisted buffer, then subscribe
+  to the per-session PubSub bus from ADR-0003 Phase 2. Appends arrive
+  via `push_event` → `phx:phoenix_replay:append` window events, which
+  the updated `player_hook.js` dispatches to the live player via
+  `rrweb-player.addEvent/1`. `:session_closed` / `:session_abandoned`
+  render an overlay banner alongside a status pill.
+- `Session.catchup/1` — atomically returns `{events, seq_watermark}`
+  for a running session (serialized against `handle_call({:append, ...})`
+  so broadcasts strictly > the returned watermark are new). Falls back
+  to `Storage.Dispatch.fetch_events/1` when the session is no longer
+  registered; in that case the watermark is `:infinity` and dedup is
+  disabled.
+- `data-mode="live"` branch in `player_hook.js` — scans for
+  `[data-phoenix-replay-player][data-mode="live"]`, waits for the first
+  `phx:phoenix_replay:catchup` event to seed rrweb-player, and appends
+  subsequent frames via `player.addEvent(ev)`. Buffered queueing handles
+  the small window between DOM mount and player-script ready.
+- `phoenix_replay_live_routes/2` router macro — mounts
+  `Live.SessionWatch` at `:path/:id/live`. Intended to sit inside an
+  admin-authenticated scope.
+- Test infrastructure: `PhoenixReplay.TestEndpoint` +
+  `PhoenixReplay.TestRouter` +  `PhoenixReplay.ConnCase` in
+  `test/support/` so future LV tests have a real endpoint to dispatch
+  against. `lazy_html` added as a test dependency (required by
+  `Phoenix.LiveViewTest` for DOM assertions).
+- 6 new LV unit tests covering mount + catchup push, live append dedup
+  by watermark, stale-seq drop, `:session_closed` + `:session_abandoned`
+  overlay + push, and fallback when no Session process is registered.
 - Session continuity across page loads — Phase 2 (ADR-0003). Adds the
   server-side per-session GenServer layer that Phase 1 deferred:
   `PhoenixReplay.Session` (one process per `session_id`, registered

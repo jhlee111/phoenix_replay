@@ -1,10 +1,18 @@
 // PhoenixReplay — rrweb-player auto-init script.
 //
 // Scans the document for `[data-phoenix-replay-player]` elements and
-// initializes `rrweb-player` on each, fetching the event stream from
-// `data-events-url`. Re-runs on DOMContentLoaded AND on LiveView
-// DOM patches (via a MutationObserver) so admin LVs get players for
-// free.
+// initializes `rrweb-player` on each. Two modes:
+//
+//   * `data-mode="replay"` (default) — one-shot: fetches the event
+//     stream from `data-events-url` and renders a finite session.
+//   * `data-mode="live"` (ADR-0004) — streams: seeds from a
+//     `phx:phoenix_replay:catchup` window event and appends frames
+//     as `phx:phoenix_replay:append` events arrive. Scoped by
+//     `data-session-id` so multiple live players on the same page
+//     (rare) stay isolated.
+//
+// Re-runs on DOMContentLoaded AND on LiveView DOM patches (via a
+// MutationObserver) so admin LVs get players for free.
 //
 // Requires: the rrweb-player ESM script + stylesheet loaded earlier
 // in the page (the `<.phoenix_replay_admin_assets />` component emits
@@ -15,10 +23,20 @@
 
   const MOUNT_ATTR = "data-phoenix-replay-player";
   const INITIALIZED = "__phx_replay_initialized";
+  // Per-session live player registry — populated on first catchup.
+  // `pending` buffers live appends that arrive before the player is
+  // initialized (e.g. rrweb-player script still loading).
+  const livePlayers = new Map();
 
   async function initOne(el) {
     if (el[INITIALIZED]) return;
     el[INITIALIZED] = true;
+
+    const mode = el.getAttribute("data-mode") || "replay";
+    if (mode === "live") {
+      initLive(el);
+      return;
+    }
 
     const eventsUrl = el.getAttribute("data-events-url");
     if (!eventsUrl) {
@@ -67,6 +85,93 @@
     }
   }
 
+  function initLive(el) {
+    const sessionId = el.getAttribute("data-session-id");
+    if (!sessionId) {
+      console.warn("[PhoenixReplay] live player missing data-session-id");
+      return;
+    }
+
+    // Placeholder until catchup arrives.
+    el.textContent = "Waiting for session…";
+
+    // Register or merge with any pre-existing entry (an append may
+    // have arrived before init, though the LV orders catchup first —
+    // this is defensive).
+    const prior = livePlayers.get(sessionId);
+    livePlayers.set(sessionId, {
+      el,
+      player: null,
+      initialized: false,
+      pending: prior?.pending || [],
+    });
+  }
+
+  async function handleCatchup(sessionId, events) {
+    const state = livePlayers.get(sessionId);
+    if (!state) return;
+
+    const Player = await resolvePlayer();
+    if (!Player) {
+      state.el.textContent =
+        "rrweb-player not loaded. Include <.phoenix_replay_admin_assets /> in the layout.";
+      return;
+    }
+
+    // rrweb-player needs at least the full-snapshot meta event to
+    // initialize. An empty catchup means the recording just started
+    // and nothing has been persisted yet; wait for the first append
+    // to arrive (it will include the full snapshot).
+    if (!events || events.length === 0) {
+      state.pendingCatchup = true;
+      return;
+    }
+
+    state.el.textContent = "";
+    state.player = new Player({
+      target: state.el,
+      props: {
+        events,
+        width: state.el.clientWidth || 1024,
+        height: parseInt(state.el.getAttribute("data-height"), 10) || 560,
+        autoPlay: true,
+        showController: true,
+        maxScale: 1,
+      },
+    });
+    state.initialized = true;
+
+    // Flush appends buffered during the init window.
+    if (state.pending.length > 0) {
+      state.pending.forEach((ev) => state.player.addEvent(ev));
+      state.pending = [];
+    }
+  }
+
+  async function handleAppend(sessionId, events) {
+    let state = livePlayers.get(sessionId);
+    if (!state) {
+      // LV pushed an append before initLive ran for this element —
+      // stash for later.
+      state = { el: null, player: null, initialized: false, pending: [] };
+      livePlayers.set(sessionId, state);
+    }
+
+    // If catchup was empty earlier, treat the first append as the
+    // seed instead of a live frame append.
+    if (state.pendingCatchup) {
+      state.pendingCatchup = false;
+      await handleCatchup(sessionId, events);
+      return;
+    }
+
+    if (state.initialized && state.player) {
+      events.forEach((ev) => state.player.addEvent(ev));
+    } else {
+      state.pending.push(...events);
+    }
+  }
+
   async function resolvePlayer() {
     // The UMD bundle exposes `window.rrwebPlayer` as a namespace
     // object: `{ Player, default }`. The constructor is either
@@ -103,6 +208,22 @@
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
+
+  // LiveView `push_event/3` dispatches each event as
+  // `phx:<name>` on `window`, with the payload on `e.detail`.
+  // See ADR-0004 / Live.SessionWatch for the three events below.
+  window.addEventListener("phx:phoenix_replay:catchup", (e) => {
+    const { session_id, events } = e.detail || {};
+    if (session_id) handleCatchup(session_id, events || []);
+  });
+  window.addEventListener("phx:phoenix_replay:append", (e) => {
+    const { session_id, events } = e.detail || {};
+    if (session_id) handleAppend(session_id, events || []);
+  });
+  // :closed / :abandoned are rendered by the LV template
+  // (status banner below the player). No JS action needed beyond
+  // letting the rrweb-player idle — no more addEvent calls will
+  // arrive after the session ends.
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {

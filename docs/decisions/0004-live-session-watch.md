@@ -1,6 +1,6 @@
 # ADR-0004: Live Session Watch — Admin "Shoulder-Surf"
 
-**Status**: Proposed
+**Status**: Accepted (2026-04-24)
 **Date**: 2026-04-23
 **Builds on**: ADR-0003 (Session Continuity)
 

@@ -1,7 +1,8 @@
-# Proposal: Live Session Watch — Admin "Shoulder-Surf"
+# Plan: Live Session Watch — Admin "Shoulder-Surf"
 
-**Status**: Proposal — pending ADR-0004 acceptance
+**Status**: Active — Phase 1 in progress (2026-04-24)
 **Drafted**: 2026-04-23
+**Promoted**: 2026-04-24 (ADR-0004 Accepted; OQ1–4 defaults confirmed)
 **ADR**: [0004-live-session-watch](../../decisions/0004-live-session-watch.md)
 
 ## Why
