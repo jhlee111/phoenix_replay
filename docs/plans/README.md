@@ -9,11 +9,10 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
-| — | Live session watch — admin "shoulder-surf" LV (ADR-0004) | active — Phase 1 | [active/live-session-watch.md](active/live-session-watch.md) |
 | 5f | Igniter installer for `mix phoenix_replay.install` | proposed | [5f-igniter-installer.md](5f-igniter-installer.md) |
 | 6  | Hex publish | deferred | — |
 
-Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4).
+Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4), ADR-0004 Phase 3 (reusable `<.session_watch>` / `<.sessions_index>` components for power users — deferred until a real consumer needs them).
 
 ## Completed phases (historical)
 
@@ -28,3 +27,4 @@ Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infra
 | — | Widget trigger UX — position preset + headless mode (ADR-0001) — see [completed plan](completed/2026-04-23-widget-trigger-ux.md) | 2026-04-23 |
 | — | On-demand recording ("Start Reproduction") — `recording={:on_demand}`, pill UI, panel state machine (ADR-0002); Phase 1 in `48d2c90`, Phase 2 in `3da8bfc` — see [completed plan](completed/2026-04-23-on-demand-recording.md) | 2026-04-23 |
 | — | Session continuity across page loads (ADR-0003); Phase 1 in `044f250` (client + minimal server), Phase 2 in `87057aa` (`PhoenixReplay.Session` GenServer + Registry + PubSub broadcasts + idle teardown) — see [completed plan](completed/2026-04-23-session-continuity.md) | 2026-04-23 |
+| — | Live session watch — admin "shoulder-surf" (ADR-0004); Phase 1 in `d65d0f7` (`Live.SessionWatch` + per-session catchup + dedup + JS live-mode), Phase 2 in `b4fa097` (`Live.SessionsIndex` + global topic + `Session.list_active/0`) — see [completed plan](completed/2026-04-24-live-session-watch.md) | 2026-04-24 |

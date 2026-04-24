@@ -1,9 +1,10 @@
 # Plan: Live Session Watch — Admin "Shoulder-Surf"
 
-**Status**: Active — Phase 1 in progress (2026-04-24)
+**Status**: Completed (2026-04-24). Phase 1 in `d65d0f7`, Phase 2 in `b4fa097`.
 **Drafted**: 2026-04-23
 **Promoted**: 2026-04-24 (ADR-0004 Accepted; OQ1–4 defaults confirmed)
 **ADR**: [0004-live-session-watch](../../decisions/0004-live-session-watch.md)
+**Phase 3** (reusable component for power-user composition) explicitly deferred — defer until a real consumer needs it.
 
 ## Why
 
