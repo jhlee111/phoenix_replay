@@ -105,6 +105,100 @@ defmodule PhoenixReplay.SessionTest do
     end
   end
 
+  describe "global :sessions topic" do
+    test "broadcasts :session_started on init", _ctx do
+      Phoenix.PubSub.subscribe(PhoenixReplay.PubSub, Session.sessions_topic())
+      session_id = unique_id()
+      identity = @identity
+
+      {:ok, _pid} = Session.start_session(session_id, identity, seq_watermark: 0)
+
+      assert_receive {:session_started, ^session_id, ^identity, %DateTime{}}
+    end
+
+    test "broadcasts :session_closed on close", _ctx do
+      session_id = unique_id()
+      {:ok, pid} = Session.start_session(session_id, @identity, seq_watermark: 0)
+      ref = Process.monitor(pid)
+
+      Phoenix.PubSub.subscribe(PhoenixReplay.PubSub, Session.sessions_topic())
+      assert :ok = Session.close(session_id, :submitted)
+
+      assert_receive {:session_closed, ^session_id, :submitted}
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    end
+
+    test "broadcasts :session_abandoned on idle timeout", _ctx do
+      session_id = unique_id()
+
+      {:ok, pid} =
+        Session.start_session(session_id, @identity,
+          seq_watermark: 0,
+          idle_timeout_ms: 30
+        )
+
+      ref = Process.monitor(pid)
+      Phoenix.PubSub.subscribe(PhoenixReplay.PubSub, Session.sessions_topic())
+
+      assert_receive {:session_abandoned, ^session_id, %DateTime{}}, 200
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 200
+    end
+  end
+
+  describe "list_active/0" do
+    test "returns a state summary per running session" do
+      sid_a = unique_id()
+      sid_b = unique_id()
+
+      {:ok, _} = Session.start_session(sid_a, @identity, seq_watermark: 0)
+      {:ok, _} = Session.start_session(sid_b, @identity, seq_watermark: 0)
+
+      ids =
+        Session.list_active()
+        |> Enum.map(& &1.session_id)
+        |> Enum.sort()
+
+      assert sid_a in ids
+      assert sid_b in ids
+    end
+
+    test "summary shape contains required keys" do
+      session_id = unique_id()
+      {:ok, _} = Session.start_session(session_id, @identity, seq_watermark: 7)
+
+      summary = Enum.find(Session.list_active(), &(&1.session_id == session_id))
+      assert is_map(summary)
+      assert summary.session_id == session_id
+      assert summary.identity == @identity
+      assert %DateTime{} = summary.started_at
+      assert %DateTime{} = summary.last_event_at
+      assert summary.seq_watermark == 7
+    end
+
+    test "survives a process dying mid-iteration" do
+      sid_a = unique_id()
+      sid_b = unique_id()
+
+      {:ok, pid_a} = Session.start_session(sid_a, @identity, seq_watermark: 0)
+      {:ok, _pid_b} = Session.start_session(sid_b, @identity, seq_watermark: 0)
+
+      # Kill one before listing — the Registry entry races with the
+      # scan; list_active must not crash.
+      ref = Process.monitor(pid_a)
+      Process.exit(pid_a, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid_a, :killed}
+
+      ids = Session.list_active() |> Enum.map(& &1.session_id)
+      assert sid_b in ids
+      refute sid_a in ids
+    end
+
+    test "returns [] when no sessions are running" do
+      stop_all_sessions()
+      assert [] = Session.list_active()
+    end
+  end
+
   describe "lookup_or_start/2" do
     test "starts a fresh process when none is registered" do
       session_id = unique_id()

@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Live session watch — Phase 2 (ADR-0004). `PhoenixReplay.Live.SessionsIndex`
+  LiveView lists every in-flight session — the entry point for the
+  watch surface. On mount, seeds from `Session.list_active/0` and
+  subscribes to a new global topic for live delta. New rows appear on
+  `:session_started`; rows disappear on `:session_closed` /
+  `:session_abandoned`. Each row links to the watch LV from Phase 1.
+  Crash safety net: pids are monitored, so a Session that exits
+  without a clean termination broadcast is still cleaned up via the
+  `:DOWN` resync path.
+- Global PubSub topic `"\#{prefix}:sessions"` — fans out
+  `{:session_started, session_id, identity, started_at}` from
+  `Session.init/1` and `{:session_closed, ...}` /
+  `{:session_abandoned, ...}` alongside the existing per-session
+  broadcasts. Per-session subscribers are unaffected; consumers who
+  only need "what's active right now" subscribe to the new topic.
+  Exposed via `PhoenixReplay.Session.sessions_topic/0`. ADR-0004 OQ1.
+- `Session.list_active/0` — snapshot of every running Session,
+  serialized via `Task.async_stream/3` (timeout 200ms,
+  kill-on-timeout) so a stuck process can't stall the scan. Returns
+  a list of state-summary maps `%{session_id, identity, started_at,
+  last_event_at, seq_watermark}`. ADR-0004 OQ2 — payload shape.
+- `:state_summary` `handle_call` on the Session GenServer — backs
+  `list_active/0` and any future "what's the current shape of this
+  session" introspection.
+- Router macro (`phoenix_replay_live_routes`) updated to mount BOTH
+  the index LV (at `:path/`) and the watch LV (at `:path/:id/live`).
+  Wrapped in `scope "/", alias: false` so hosts can call the macro
+  inside a non-aliased outer scope.
+- 10 new tests: 4 for the global topic + state_summary + list_active
+  in `session_test.exs`; 6 for `Live.SessionsIndex` covering mount,
+  insert/remove broadcasts, empty state, and the crash-DOWN resync
+  path.
 - Live session watch — Phase 1 (ADR-0004). `PhoenixReplay.Live.SessionWatch`
   LiveView streams an in-flight recording into rrweb-player in real
   time. On mount: catch up from the persisted buffer, then subscribe

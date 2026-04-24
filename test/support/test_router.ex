@@ -13,6 +13,7 @@ defmodule PhoenixReplay.TestRouter do
   scope "/", PhoenixReplay.Live do
     pipe_through :browser
 
+    live "/sessions", SessionsIndex, :index
     live "/sessions/:id/live", SessionWatch, :watch
   end
 end

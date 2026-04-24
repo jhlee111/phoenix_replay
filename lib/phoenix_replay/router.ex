@@ -79,6 +79,10 @@ defmodule PhoenixReplay.Router do
 
   ## Routes
 
+    * `GET :path/`        → `PhoenixReplay.Live.SessionsIndex`
+      Index of every in-flight session, with live updates as new
+      sessions start and active ones close (ADR-0004 Phase 2). Each
+      row links to the watch LV.
     * `GET :path/:id/live` → `PhoenixReplay.Live.SessionWatch`
       Live-stream an in-flight session's rrweb frames into
       rrweb-player as they arrive (ADR-0004 Phase 1). Path param
@@ -99,8 +103,15 @@ defmodule PhoenixReplay.Router do
   """
   defmacro phoenix_replay_live_routes(path, opts \\ []) do
     quote bind_quoted: [path: path, opts: opts] do
-      scope path, alias: false do
-        live "/:id/live", PhoenixReplay.Live.SessionWatch, :watch
+      # Wrap in `alias: false` so the host's enclosing scope alias
+      # doesn't get prepended to PhoenixReplay.Live.* module names.
+      # Keeping the path on each `live` (rather than nesting via
+      # `scope path do; live "/" ...`) sidesteps a Phoenix quirk
+      # where `live "/"` inside a nested scope silently drops the
+      # route.
+      scope "/", alias: false do
+        live "#{path}", PhoenixReplay.Live.SessionsIndex, :index
+        live "#{path}/:id/live", PhoenixReplay.Live.SessionWatch, :watch
       end
 
       _ = opts

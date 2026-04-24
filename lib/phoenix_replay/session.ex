@@ -131,6 +131,49 @@ defmodule PhoenixReplay.Session do
   end
 
   @doc """
+  Returns a snapshot of every running Session — one summary map per
+  registered process. Used by the index LV at mount time to seed its
+  table; live updates arrive afterwards via the global
+  `"\#{prefix}:sessions"` topic.
+
+  Concurrent: each `Registry.select/2` hit fans out to its Session
+  via `Task.async_stream/3` (timeout 200ms, kill-on-timeout) so a
+  single stuck process can't stall the whole snapshot. Sessions that
+  die mid-iteration are silently dropped.
+
+  ## Summary shape
+
+      %{
+        session_id: String.t(),
+        identity: map(),
+        started_at: DateTime.t(),
+        last_event_at: DateTime.t(),
+        seq_watermark: non_neg_integer()
+      }
+  """
+  @spec list_active() :: [map()]
+  def list_active do
+    PhoenixReplay.SessionRegistry
+    |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Task.async_stream(
+      fn {_session_id, pid} ->
+        try do
+          GenServer.call(pid, :state_summary, 100)
+        catch
+          :exit, _ -> nil
+        end
+      end,
+      timeout: 200,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.flat_map(fn
+      {:ok, %{} = summary} -> [summary]
+      _ -> []
+    end)
+  end
+
+  @doc """
   Returns the historical event stream plus the current `seq_watermark`
   for a running session, serialized against in-flight appends. Used by
   the live watch LV at mount time to seed the player with catch-up
@@ -176,12 +219,14 @@ defmodule PhoenixReplay.Session do
     seq_watermark = Keyword.get(opts, :seq_watermark, 0)
     idle_ms = Keyword.get(opts, :idle_timeout_ms, Config.session_idle_timeout_ms())
 
+    now = DateTime.utc_now()
+
     state = %{
       session_id: session_id,
       identity: identity,
       seq_watermark: seq_watermark,
-      started_at: DateTime.utc_now(),
-      last_event_at: DateTime.utc_now(),
+      started_at: now,
+      last_event_at: now,
       idle_timeout_ms: idle_ms,
       idle_timer: nil,
       recent_seqs: :queue.new(),
@@ -189,6 +234,8 @@ defmodule PhoenixReplay.Session do
       pubsub: Config.pubsub(),
       topic: topic_for(session_id)
     }
+
+    broadcast_global(state, {:session_started, session_id, identity, now})
 
     {:ok, schedule_idle(state)}
   end
@@ -236,6 +283,7 @@ defmodule PhoenixReplay.Session do
   def handle_call({:close, reason}, _from, state) do
     cancel_idle(state)
     broadcast(state, {:session_closed, state.session_id, reason})
+    broadcast_global(state, {:session_closed, state.session_id, reason})
     {:stop, :normal, :ok, state}
   end
 
@@ -248,8 +296,14 @@ defmodule PhoenixReplay.Session do
   end
 
   @impl true
+  def handle_call(:state_summary, _from, state) do
+    {:reply, state_summary(state), state}
+  end
+
+  @impl true
   def handle_info(:idle_timeout, state) do
     broadcast(state, {:session_abandoned, state.session_id, state.last_event_at})
+    broadcast_global(state, {:session_abandoned, state.session_id, state.last_event_at})
     {:stop, :normal, state}
   end
 
@@ -293,7 +347,30 @@ defmodule PhoenixReplay.Session do
     Phoenix.PubSub.broadcast(pubsub, topic, msg)
   end
 
+  defp broadcast_global(%{pubsub: nil}, _msg), do: :ok
+
+  defp broadcast_global(%{pubsub: pubsub}, msg) do
+    Phoenix.PubSub.broadcast(pubsub, sessions_topic(), msg)
+  end
+
+  defp state_summary(state) do
+    %{
+      session_id: state.session_id,
+      identity: state.identity,
+      started_at: state.started_at,
+      last_event_at: state.last_event_at,
+      seq_watermark: state.seq_watermark
+    }
+  end
+
   defp topic_for(session_id) do
     "#{Config.pubsub_topic_prefix()}:session:#{session_id}"
+  end
+
+  @doc false
+  # Public so the index LV (and tests) can subscribe to the global
+  # bus without re-deriving the prefix.
+  def sessions_topic do
+    "#{Config.pubsub_topic_prefix()}:sessions"
   end
 end
