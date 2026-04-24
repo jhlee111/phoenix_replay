@@ -47,6 +47,7 @@ if Code.ensure_loaded?(Igniter) do
     def igniter(igniter) do
       igniter
       |> configure_phoenix_replay()
+      |> patch_router()
     end
 
     defp configure_phoenix_replay(igniter) do
@@ -106,6 +107,140 @@ if Code.ensure_loaded?(Igniter) do
       |> List.wrap()
       |> Module.concat()
     end
+
+    # --- Router patcher ---------------------------------------------
+
+    defp patch_router(igniter) do
+      {igniter, router} = Igniter.Libs.Phoenix.select_router(igniter)
+
+      if router do
+        igniter
+        |> ensure_router_import(router)
+        |> ensure_pipeline(router, :feedback_ingest, """
+        plug :accepts, ["json"]
+        plug :fetch_session
+        plug :protect_from_forgery
+        """)
+        |> ensure_pipeline(router, :admin_json, """
+        plug :accepts, ["json"]
+        plug :fetch_session
+        """)
+        |> ensure_scope_with_macro(router, "/", :feedback_ingest, :feedback_routes)
+        |> ensure_scope_with_macro(router, "/admin", :admin_json, :admin_routes)
+      else
+        Igniter.add_warning(igniter, """
+        No Phoenix router found. Add the following manually to your router:
+
+            import PhoenixReplay.Router
+
+            pipeline :feedback_ingest do
+              plug :accepts, ["json"]
+              plug :fetch_session
+              plug :protect_from_forgery
+            end
+
+            pipeline :admin_json do
+              plug :accepts, ["json"]
+              plug :fetch_session
+            end
+
+            scope "/" do
+              pipe_through :feedback_ingest
+              feedback_routes "/api/feedback"
+            end
+
+            scope "/admin" do
+              pipe_through :admin_json
+              admin_routes "/feedback"
+            end
+        """)
+      end
+    end
+
+    defp ensure_router_import(igniter, router) do
+      Igniter.Project.Module.find_and_update_module!(igniter, router, fn zipper ->
+        case Igniter.Code.Common.move_to(zipper, fn z ->
+               Igniter.Code.Function.function_call?(z, :import, 1) and
+                 Igniter.Code.Function.argument_equals?(z, 0, PhoenixReplay.Router)
+             end) do
+          {:ok, _} ->
+            {:ok, zipper}
+
+          :error ->
+            # Place the import right after a `use Phoenix.Router` or
+            # `use <WebModule>, :router` call. We scan with a single
+            # predicate so both arities match.
+            case Igniter.Code.Common.move_to(zipper, &use_router_call?/1) do
+              {:ok, use_zipper} ->
+                {:ok,
+                 Igniter.Code.Common.add_code(
+                   use_zipper,
+                   "import PhoenixReplay.Router",
+                   placement: :after
+                 )}
+
+              :error ->
+                {:warning,
+                 "Could not find a `use ..., :router` (or `use Phoenix.Router`) call in " <>
+                   "#{inspect(router)}. Add `import PhoenixReplay.Router` manually."}
+            end
+        end
+      end)
+    end
+
+    defp use_router_call?(zipper) do
+      cond do
+        # `use <WebModule>, :router`
+        Igniter.Code.Function.function_call?(zipper, :use, 2) ->
+          Igniter.Code.Function.argument_equals?(zipper, 1, :router)
+
+        # `use Phoenix.Router`
+        Igniter.Code.Function.function_call?(zipper, :use, 1) ->
+          Igniter.Code.Function.argument_equals?(zipper, 0, Phoenix.Router)
+
+        true ->
+          false
+      end
+    end
+
+    defp ensure_pipeline(igniter, router, name, contents) do
+      case Igniter.Libs.Phoenix.has_pipeline(igniter, router, name) do
+        {igniter, true} ->
+          igniter
+
+        {igniter, false} ->
+          Igniter.Libs.Phoenix.add_pipeline(igniter, name, contents,
+            router: router,
+            warn_on_present?: false
+          )
+      end
+    end
+
+    defp ensure_scope_with_macro(igniter, router, route, pipeline, macro_name) do
+      # Skip if any `<macro_name>(...)` call exists in the router. The
+      # caller passes a function name like `:feedback_routes` — we
+      # don't try to verify the route arg matches; if a host already
+      # invoked the macro, we trust their wiring.
+      Igniter.Project.Module.find_and_update_module!(igniter, router, fn zipper ->
+        case Igniter.Code.Function.move_to_function_call(zipper, macro_name, :any) do
+          {:ok, _} ->
+            {:ok, zipper}
+
+          _ ->
+            scope_block = """
+            scope #{inspect(route)} do
+              pipe_through #{inspect(pipeline)}
+              #{macro_name}(#{inspect(scope_arg_for(macro_name))})
+            end
+            """
+
+            {:ok, Igniter.Code.Common.add_code(zipper, scope_block, placement: :after)}
+        end
+      end)
+    end
+
+    defp scope_arg_for(:feedback_routes), do: "/api/feedback"
+    defp scope_arg_for(:admin_routes), do: "/feedback"
   end
 else
   defmodule Mix.Tasks.PhoenixReplay.Install do

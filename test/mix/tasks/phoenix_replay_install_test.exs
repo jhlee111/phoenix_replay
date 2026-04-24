@@ -55,4 +55,50 @@ defmodule Mix.Tasks.PhoenixReplay.InstallTest do
       refute content =~ "REPLACE_ME_WITH_A_RANDOM_SECRET"
     end
   end
+
+  describe "router patcher" do
+    @router_path "lib/test_app_web/router.ex"
+    @router_module """
+    defmodule TestAppWeb.Router do
+      use Phoenix.Router
+
+      pipeline :browser do
+        plug :accepts, ["html"]
+      end
+
+      scope "/", TestAppWeb do
+        pipe_through :browser
+      end
+    end
+    """
+
+    test "adds import + pipelines + scopes on a fresh router" do
+      igniter =
+        test_project(app_name: :test_app, files: %{@router_path => @router_module})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      content =
+        igniter.rewrite
+        |> Rewrite.source!(@router_path)
+        |> Rewrite.Source.get(:content)
+
+      assert content =~ "import PhoenixReplay.Router"
+      assert content =~ "pipeline :feedback_ingest"
+      assert content =~ "pipeline :admin_json"
+      assert content =~ ~s|feedback_routes("/api/feedback")|
+      assert content =~ ~s|admin_routes("/feedback")|
+    end
+
+    test "is idempotent — re-running over its own output leaves the router alone" do
+      first =
+        test_project(app_name: :test_app, files: %{@router_path => @router_module})
+        |> Igniter.compose_task("phoenix_replay.install", [])
+        |> apply_igniter!()
+
+      second = Igniter.compose_task(first, "phoenix_replay.install", [])
+
+      assert_unchanged(second, @router_path)
+    end
+  end
 end
