@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Igniter-based installer (Phase 5f). `mix igniter.install phoenix_replay`
+  now patches the host project end-to-end:
+  - `:phoenix_replay` config block in `config/config.exs` with TODO-
+    marked defaults for `session_token_secret`, `identify`, and
+    `storage`.
+  - Router patches: `import PhoenixReplay.Router`, the
+    `:feedback_ingest` and `:admin_json` pipelines, and scope blocks
+    invoking `feedback_routes "/api/feedback"` and
+    `admin_routes "/feedback"`. Handles both `use Phoenix.Router`
+    and `use <WebModule>, :router` shapes.
+  - Endpoint: `plug Plug.Static, at: "/phoenix_replay",
+    from: {:phoenix_replay, "priv/static/assets"}` after the `use
+    Phoenix.Endpoint` line.
+  - Root layout: a widget snippet inserted before `</body>`,
+    gated by `Application.get_env(:phoenix_replay, :widget_enabled,
+    false)` so installer-generated apps default to capture-off.
+  - `<HostApp>.Feedback.Identify` stub module with
+    `fetch_identity/1` and `fetch_metadata/1` defaulting to
+    anonymous.
+  - The `create_phoenix_replay_tables` migration (was already
+    copied; now generated through Igniter so it composes with the
+    rest).
+  Every patcher is idempotent — re-running over its own output
+  produces zero diff. Falls back to the original plain-Mix path
+  (migration copy + manual README pointer) when Igniter isn't in
+  the host's deps. README install section rewritten to lead with
+  the one-shot.
 - Live session watch — Phase 2 (ADR-0004). `PhoenixReplay.Live.SessionsIndex`
   LiveView lists every in-flight session — the entry point for the
   watch surface. On mount, seeds from `Session.list_active/0` and

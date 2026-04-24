@@ -65,27 +65,60 @@ baked into the Feedback resource.
 
 ## Installation
 
-```elixir
-# mix.exs
-def deps do
-  [
-    {:phoenix_replay, github: "jhlee111/phoenix_replay", branch: "main"}
-  ]
-end
+### Recommended: one-shot via Igniter
+
+```bash
+mix igniter.install phoenix_replay
 ```
 
-Then:
+This adds the dep to `mix.exs`, fetches it, and runs
+`mix phoenix_replay.install` — which patches your config, router,
+endpoint, and root layout, generates a `Feedback.Identify` stub, and
+copies the migration. You finish by:
+
+1. Replacing `REPLACE_ME_WITH_A_RANDOM_SECRET` in
+   `config/config.exs` with a real secret (e.g.
+   `System.fetch_env!("PHOENIX_REPLAY_TOKEN_SALT")`).
+2. Filling in `lib/<app>/feedback/identify.ex`'s `fetch_identity/1`
+   with your auth lookup (default returns `:anonymous`).
+3. `mix ecto.migrate` to apply the migration.
+4. Flipping `config :phoenix_replay, widget_enabled: true` when
+   ready to start capturing.
+
+What the installer touches:
+
+- `config/config.exs` — `:phoenix_replay` block (`session_token_secret`,
+  `identify`, `storage`).
+- Router — `import PhoenixReplay.Router`, `:feedback_ingest` and
+  `:admin_json` pipelines, scopes invoking `feedback_routes` +
+  `admin_routes`.
+- Endpoint — `plug Plug.Static, at: "/phoenix_replay", ...`.
+- Root layout — widget snippet behind a `widget_enabled` flag.
+- `lib/<app>/feedback/identify.ex` — `fetch_identity/1` +
+  `fetch_metadata/1` stubs.
+- `priv/repo/migrations/*_create_phoenix_replay_tables.exs` —
+  `phoenix_replay_feedbacks` + `phoenix_replay_events` +
+  `phoenix_replay_feedback_comments`.
+
+Re-running the installer is safe — every patch is idempotent.
+
+### Manual install
+
+If you've already added the dep:
+
+```elixir
+{:phoenix_replay, github: "jhlee111/phoenix_replay", branch: "main"}
+```
 
 ```bash
 mix deps.get
-mix phoenix_replay.install   # writes one migration
+mix phoenix_replay.install
 mix ecto.migrate
 ```
 
-The installer creates one migration that provisions two tables:
-
-- `phoenix_replay_feedbacks` — one row per submitted bug report
-- `phoenix_replay_events` — rrweb frames, keyed by session
+If `igniter` isn't in your deps, the installer prints how to add it.
+The wiring sections below describe what the installer would otherwise
+patch — useful as a reference or for hand-rolled installs.
 
 ### 1. Configure
 
