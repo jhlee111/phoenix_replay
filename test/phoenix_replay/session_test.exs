@@ -183,14 +183,15 @@ defmodule PhoenixReplay.SessionTest do
       {:ok, _pid_b} = Session.start_session(sid_b, @identity, seq_watermark: 0)
 
       # Kill one before listing — the Registry entry races with the
-      # scan; list_active must not crash.
+      # scan; list_active must not crash. We don't assert sid_a is
+      # absent because the supervisor's :transient restart spec
+      # respawns the killed session, racing against list_active.
       ref = Process.monitor(pid_a)
       Process.exit(pid_a, :kill)
       assert_receive {:DOWN, ^ref, :process, ^pid_a, :killed}
 
       ids = Session.list_active() |> Enum.map(& &1.session_id)
       assert sid_b in ids
-      refute sid_a in ids
     end
 
     test "returns [] when no sessions are running" do

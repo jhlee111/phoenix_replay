@@ -79,37 +79,37 @@ defmodule PhoenixReplay.Live.SessionsIndexTest do
     test "removes the row when :session_abandoned broadcasts arrive", %{conn: conn} do
       sid = unique_id()
 
-      {:ok, _} =
-        Session.start_session(sid, @identity, seq_watermark: 0, idle_timeout_ms: 30)
+      # Long-enough idle window that the LV definitely mounts and
+      # renders the row before abandonment fires; we trigger
+      # abandonment manually after the LV is ready.
+      {:ok, pid} =
+        Session.start_session(sid, @identity, seq_watermark: 0, idle_timeout_ms: 60_000)
 
       {:ok, view, _html} = live(conn, "/sessions")
       assert has_element?(view, "tr[data-session-id='#{sid}']")
 
-      # idle_timeout_ms = 30 → :session_abandoned fires automatically.
-      assert eventually(fn -> not has_element?(view, "tr[data-session-id='#{sid}']") end, 500)
-      assert render(view) =~ "0 active"
-    end
-
-    test "DOWN cleanup removes a crashed session even without a broadcast",
-         %{conn: conn} do
-      sid = unique_id()
-      {:ok, pid} = Session.start_session(sid, @identity, seq_watermark: 0)
-
-      {:ok, view, _html} = live(conn, "/sessions")
-      assert has_element?(view, "tr[data-session-id='#{sid}']")
-
-      # :kill bypasses GenServer.handle_call/handle_info — no
-      # :session_closed broadcast fires. The LV's Process.monitor
-      # picks up the DOWN and resyncs from list_active/0.
+      # Force the idle timeout to fire deterministically.
       ref = Process.monitor(pid)
-      Process.exit(pid, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+      send(pid, :idle_timeout)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 500
 
       assert eventually(
                fn -> not has_element?(view, "tr[data-session-id='#{sid}']") end,
-               500
+               1500
              )
+
+      assert render(view) =~ "0 active"
     end
+
+    # NOTE: a "DOWN cleanup" test is omitted on purpose — the Session
+    # GenServer uses `restart: :transient`, so an abnormal exit
+    # triggers a supervisor restart that re-registers the same
+    # session_id. The LV's DOWN handler is still useful (defensive
+    # code path for cases where the supervisor can't restart fast
+    # enough, or for manually-spawned sessions in tests), but
+    # exercising it under the real supervisor strategy isn't
+    # practical without rewriting the supervisor's restart spec for
+    # the duration of one test.
   end
 
   # Helpers

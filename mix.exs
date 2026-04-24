@@ -45,7 +45,8 @@ defmodule PhoenixReplay.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:igniter, "~> 0.7", optional: true}
     ]
   end
 

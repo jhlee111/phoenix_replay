@@ -1,103 +1,143 @@
-defmodule Mix.Tasks.PhoenixReplay.Install do
-  @shortdoc "Copies the PhoenixReplay migration into priv/repo/migrations"
+if Code.ensure_loaded?(Igniter) do
+  defmodule Mix.Tasks.PhoenixReplay.Install do
+    @example "mix igniter.install phoenix_replay"
+    @shortdoc "Installs phoenix_replay into a Phoenix project"
 
-  @moduledoc """
-  Copies the PhoenixReplay migration into your application's
-  `priv/repo/migrations` directory.
+    @moduledoc """
+    Installs `phoenix_replay` into a Phoenix project.
 
-  ## Usage
+    ## Recommended
 
-      mix phoenix_replay.install
+        #{@example}
 
-  Creates one migration that defines the two tables
-  `phoenix_replay_feedbacks` + `phoenix_replay_events`.
+    Igniter adds `phoenix_replay` to your deps, fetches it, and runs
+    this installer. After this task completes, fill in the two
+    `# TODO:` comments in `config/config.exs` (`session_token_secret`
+    and the `identify` callback module) and run `mix ecto.migrate`.
 
-  ## Options
+    ## What it does
 
-    * `--repo` (`-r`) — Ecto repo the migration targets. Defaults to the
-      first repo listed under `config :my_app, :ecto_repos`.
+      1. Inserts a `:phoenix_replay` config block in `config/config.exs`
+         with sensible defaults plus TODO markers for the two values
+         you must fill in.
 
-  After running this task, apply the migration with:
+    More patchers (router, endpoint, root layout, identity stub,
+    migration copy) land in the next phases of ADR-5f.
 
-      mix ecto.migrate
-  """
+    ## Manual install
 
-  use Mix.Task
+    If you've already added `{:phoenix_replay, ...}` to your `mix.exs`
+    yourself:
 
-  @template_path "priv/templates/phoenix_replay.install/migrations/create_phoenix_replay_tables.ex"
+        mix phoenix_replay.install
+    """
 
-  @impl Mix.Task
-  def run(args) do
-    Mix.Task.run("app.config")
+    use Igniter.Mix.Task
 
-    {opts, _} = OptionParser.parse!(args, strict: [repo: :string], aliases: [r: :repo])
-
-    repo = resolve_repo(opts)
-    migrations_path = migrations_path(repo)
-    timestamp = timestamp()
-    module = Module.concat([repo, Migrations, "CreatePhoenixReplayTables"])
-
-    File.mkdir_p!(migrations_path)
-    target_file = Path.join(migrations_path, "#{timestamp}_create_phoenix_replay_tables.exs")
-
-    if File.exists?(target_file) do
-      Mix.shell().info([:yellow, "* skipping ", :reset, Path.relative_to_cwd(target_file)])
-    else
-      contents =
-        :phoenix_replay
-        |> Application.app_dir(@template_path)
-        |> File.read!()
-        |> EEx.eval_string(assigns: [module: module])
-
-      File.write!(target_file, contents)
-      Mix.shell().info([:green, "* creating ", :reset, Path.relative_to_cwd(target_file)])
+    @impl Igniter.Mix.Task
+    def info(_argv, _composing_task) do
+      %Igniter.Mix.Task.Info{
+        group: :phoenix_replay,
+        example: @example,
+        schema: []
+      }
     end
 
-    Mix.shell().info([
-      :cyan,
-      "\nRun ",
-      :reset,
-      "mix ecto.migrate",
-      :cyan,
-      " to apply the migration."
-    ])
-  end
+    @impl Igniter.Mix.Task
+    def igniter(igniter) do
+      igniter
+      |> configure_phoenix_replay()
+    end
 
-  defp resolve_repo(opts) do
-    case Keyword.fetch(opts, :repo) do
-      {:ok, repo_str} ->
-        Module.concat([repo_str])
+    defp configure_phoenix_replay(igniter) do
+      app_name = Igniter.Project.Application.app_name(igniter)
 
-      :error ->
-        case Mix.Project.config()[:app] do
-          nil ->
-            Mix.raise(
-              "Could not infer Ecto repo; pass --repo MyApp.Repo"
-            )
-
-          app ->
-            case Application.get_env(app, :ecto_repos, []) do
-              [repo | _] ->
-                repo
-
-              [] ->
-                Mix.raise(
-                  "No Ecto repos configured for :#{app}. Pass --repo MyApp.Repo."
-                )
-            end
+      igniter
+      |> ensure_config(
+        :session_token_secret,
+        quote do
+          # TODO: replace with a real secret from environment, e.g.
+          # System.fetch_env!("PHOENIX_REPLAY_TOKEN_SALT")
+          "REPLACE_ME_WITH_A_RANDOM_SECRET"
         end
+      )
+      |> ensure_config(
+        :identify,
+        quote do
+          # TODO: implement and configure the identity callback. Receives
+          # the Plug.Conn and must return a map shaped
+          # `%{kind: :user | :api_key | :anonymous, id: String.t() | nil,
+          #    attrs: map()}` or `nil` to reject the session with 401.
+          {unquote(host_module_alias(app_name)).Feedback.Identify, :fetch_identity, []}
+        end
+      )
+      |> ensure_config(
+        :storage,
+        quote do
+          {PhoenixReplay.Storage.Ecto,
+           [repo: unquote(host_module_alias(app_name)).Repo]}
+        end
+      )
+    end
+
+    defp ensure_config(igniter, key, value_ast) do
+      if Igniter.Project.Config.configures_key?(
+           igniter,
+           "config.exs",
+           :phoenix_replay,
+           key
+         ) do
+        igniter
+      else
+        Igniter.Project.Config.configure(
+          igniter,
+          "config.exs",
+          :phoenix_replay,
+          [key],
+          {:code, value_ast}
+        )
+      end
+    end
+
+    defp host_module_alias(app_name) do
+      app_name
+      |> Atom.to_string()
+      |> Macro.camelize()
+      |> List.wrap()
+      |> Module.concat()
     end
   end
+else
+  defmodule Mix.Tasks.PhoenixReplay.Install do
+    @shortdoc "Installs phoenix_replay (requires igniter)"
 
-  defp migrations_path(repo) do
-    priv = repo.config()[:priv] || "priv/#{repo |> Module.split() |> List.last() |> Macro.underscore()}"
-    Path.join(priv, "migrations")
-  end
+    @moduledoc """
+    Installs phoenix_replay into your project.
 
-  defp timestamp do
-    {{y, m, d}, {h, mi, s}} = :calendar.universal_time()
+    Requires Igniter. Add `{:igniter, "~> 0.7"}` to your deps and run
+    `mix deps.get`, then re-run this task. Or use the recommended one-
+    shot:
 
-    :io_lib.format("~4..0B~2..0B~2..0B~2..0B~2..0B~2..0B", [y, m, d, h, mi, s])
-    |> IO.iodata_to_binary()
+        mix igniter.install phoenix_replay
+    """
+
+    use Mix.Task
+
+    def run(_argv) do
+      Mix.shell().error("""
+      The task `phoenix_replay.install` requires Igniter for automatic
+      configuration. Install it with:
+
+          {:igniter, "~> 0.7"}
+
+      and re-run, or use the one-shot:
+
+          mix igniter.install phoenix_replay
+
+      See https://hexdocs.pm/igniter for details.
+      """)
+
+      exit({:shutdown, 1})
+    end
   end
 end
