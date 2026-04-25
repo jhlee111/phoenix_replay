@@ -1,6 +1,6 @@
 # Plan: Replay Player Timeline Event Bus
 
-**Status**: Active — Phase 1 in progress
+**Status**: Active — Phases 1 + 2 shipped (commits `0a66fab`, `777d3b0`); Phase 3 (docs) next
 **Drafted**: 2026-04-24
 **ADR**: [0005-replay-player-timeline-event-bus](../../decisions/0005-replay-player-timeline-event-bus.md)
 
@@ -18,7 +18,7 @@ implementation plan.
 
 ## Phases
 
-### Phase 1 — Event bus + state events
+### Phase 1 — Event bus + state events ✅ shipped 2026-04-24 (`0a66fab`)
 
 **Goal**: window custom events fire when the player transitions
 between play / pause / seek / ended. No tick events yet. Consumers
@@ -63,7 +63,7 @@ can subscribe with raw `addEventListener`.
       the headline use case for ADR-0004 admins).
 - [ ] CHANGELOG entry.
 
-### Phase 2 — `subscribeTimeline` helper + tick events
+### Phase 2 — `subscribeTimeline` helper + tick events ✅ shipped 2026-04-24 (`777d3b0`)
 
 **Goal**: a friendly subscription helper that handles per-subscriber
 tick rate. Most consumers should never need to talk to the raw

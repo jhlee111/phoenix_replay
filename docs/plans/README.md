@@ -9,7 +9,7 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 | # | Phase | Status | File |
 |---|-------|--------|------|
-| —  | Replay player timeline event bus (ADR-0005) | Phase 1 in progress | [active/2026-04-24-timeline-event-bus.md](active/2026-04-24-timeline-event-bus.md) |
+| —  | Replay player timeline event bus (ADR-0005) | Phases 1 + 2 shipped; Phase 3 (docs) next | [active/2026-04-24-timeline-event-bus.md](active/2026-04-24-timeline-event-bus.md) |
 | 6  | Hex publish | deferred | — |
 
 ## Proposals (drafted, not yet committed)
