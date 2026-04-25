@@ -465,6 +465,49 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 - [ ] [Phase 5f](docs/plans/5f-igniter-installer.md) — Igniter installer (`mix phoenix_replay.install`)
 - [ ] Phase 6 — Hex publish (PoC hardening first)
 
+## Panel addons
+
+The widget panel exposes a small extension API so other libraries can
+inject custom form content above the description textarea. Each addon
+registers a JS hook that receives a mount context and returns optional
+`beforeSubmit` / `onPanelClose` callbacks. Returned `extras` from
+`beforeSubmit` are merged into the `/submit` POST body and forwarded to
+the configured `Storage` adapter via `submit_params["extras"]`.
+
+```js
+window.PhoenixReplay.registerPanelAddon({
+  id: "my-addon",
+  slot: "form-top",                         // only "form-top" today
+  mount(ctx) {
+    // ctx = {
+    //   slotEl,                            // <div data-slot="form-top">
+    //   sessionId(),                       // current session id, or null
+    //   sessionStartedAtMs(),              // wall-clock at session start, or null
+    //   onPanelClose(cb),                  // register cleanup
+    //   reportError(message),              // surface on the panel error screen
+    // }
+    ctx.slotEl.innerHTML = "<button type='button'>Hi</button>";
+    return {
+      async beforeSubmit({ formData }) {
+        return { extras: { my_key: "value" } };
+      },
+      onPanelClose() { /* cleanup */ },
+    };
+  },
+});
+```
+
+The Storage adapter sees the merged extras under `submit_params["extras"]`:
+
+```elixir
+def submit(session_id, %{"extras" => %{"my_key" => v}} = _params, _identity) do
+  # ...
+end
+```
+
+`ash_feedback`'s audio narration recorder is the first consumer of this
+API — see its README for the end-to-end shape.
+
 ## Companion packages
 
 - [`ash_feedback`](https://github.com/jhlee111/ash_feedback) — Ash
@@ -472,7 +515,8 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
   `AshPaperTrail`, PubSub, and a triage state machine
   (new → acknowledged → in_progress → verified_on_preview → resolved).
   Ships a thin `PhoenixReplay.Storage` implementation that routes
-  `POST /submit` through the Ash domain.
+  `POST /submit` through the Ash domain. Also ships an audio-narration
+  recorder that plugs into the panel addon API above.
 
 ## License
 
