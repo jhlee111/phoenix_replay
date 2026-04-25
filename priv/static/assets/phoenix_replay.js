@@ -371,7 +371,7 @@
       await startRecording();
     }
 
-    async function report({ description, severity, metadata = {}, jamLink = null }) {
+    async function report({ description, severity, metadata = {}, jamLink = null, extras = {} }) {
       // Flush any buffered events first so the submit record captures the
       // full tail of the session.
       await flush();
@@ -381,6 +381,7 @@
         severity: severity || cfg.defaultSeverity,
         metadata,
         jam_link: jamLink,
+        extras,
       }, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
