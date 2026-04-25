@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Panel addon API: `window.PhoenixReplay.registerPanelAddon({ id, slot, mount })`
+  registers a JS hook into the widget panel form. `mount(ctx)` returns
+  optional `beforeSubmit` and `onPanelClose` callbacks. `beforeSubmit`
+  returns `{ extras }` which is merged into the `/submit` POST body.
+  First consumer: `ash_feedback`'s audio narration recorder.
+- DOM slot `<div data-slot="form-top">` rendered between description
+  and severity inside the panel form.
+- `extras` field on `report()` and on the `/submit` POST body. The
+  configured `PhoenixReplay.Storage` adapter receives extras inside
+  `submit_params` under the `"extras"` key. Adapter behaviour signature
+  unchanged.
 - Replay player timeline event bus — Phase 2 (ADR-0005). Friendlier
   subscription helper on top of the Phase 1 window bus.
   - `window.PhoenixReplayAdmin.subscribeTimeline(sessionId, callback,
