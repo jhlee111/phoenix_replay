@@ -11,6 +11,12 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 |---|-------|--------|------|
 | 6  | Hex publish | deferred | — |
 
+## Proposals (drafted, not yet committed)
+
+| Proposal | Depends on | File |
+|----------|------------|------|
+| Replay player timeline event bus (ADR-0005) | ADR-0005 acceptance | [proposals/timeline-event-bus.md](proposals/timeline-event-bus.md) |
+
 Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4), ADR-0004 Phase 3 (reusable `<.session_watch>` / `<.sessions_index>` components for power users — deferred until a real consumer needs them).
 
 ## Completed phases (historical)

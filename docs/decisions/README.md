@@ -8,6 +8,7 @@
 | [0002](./0002-on-demand-recording.md) | On-Demand Recording Mode — "Start Reproduction" | Accepted | 2026-04-23 |
 | [0003](./0003-session-continuity.md) | Session Continuity Across Page Loads | Accepted | 2026-04-23 |
 | [0004](./0004-live-session-watch.md) | Live Session Watch — Admin "Shoulder-Surf" | Accepted | 2026-04-24 |
+| [0005](./0005-replay-player-timeline-event-bus.md) | Replay Player Timeline Event Bus | Proposed | 2026-04-24 |
 
 ## Rules
 
