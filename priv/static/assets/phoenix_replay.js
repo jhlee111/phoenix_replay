@@ -206,6 +206,7 @@
 
     const buffer = createRingBuffer(cfg.maxBufferedEvents);
     let sessionToken = null;
+    let sessionStartedAtMs = null;
     let seq = 0;
     let flushTimer = null;
     let recorder = null;
@@ -252,6 +253,7 @@
       }
 
       sessionToken = freshToken;
+      sessionStartedAtMs = Date.now();
       storageWrite(STORAGE_KEYS.TOKEN, freshToken);
       seq = resumed ? (Number(res.seq_watermark) || 0) + 1 : 0;
     }
@@ -275,6 +277,7 @@
           if (err instanceof PhoenixReplayError && (err.status === 410 || err.status === 401)) {
             // Session expired / unauthorized → mint a fresh token; drop these events.
             sessionToken = null;
+            sessionStartedAtMs = null;
             await ensureSession().catch(() => {});
             return;
           }
@@ -312,6 +315,7 @@
       // token first (ADR-0003); we only null the in-memory token,
       // not the storage slot.
       sessionToken = null;
+      sessionStartedAtMs = null;
       seq = 0;
       await ensureSession();
       recorder = createRecorder({ buffer });
@@ -345,6 +349,7 @@
       recording = false;
       buffer.drain();
       sessionToken = null;
+      sessionStartedAtMs = null;
       seq = 0;
       // Drop the continuity token too — reset means "new reproduction",
       // not "rejoin the old one". `startRecording` will mint a fresh
@@ -394,6 +399,7 @@
       }
       cancelFlushTimer();
       sessionToken = null;
+      sessionStartedAtMs = null;
       seq = 0;
       // The session is closed server-side after submit; drop both
       // continuity slots so the next page load starts clean rather
@@ -463,7 +469,13 @@
       stopRecording,
       resetRecording,
       isRecording,
-      _internals: { buffer },
+      _internals: {
+        buffer,
+        // No client-side session id is tracked (only the opaque token);
+        // exposed as null so addon ctx.sessionId() degrades gracefully.
+        sessionId: () => null,
+        sessionStartedAtMs: () => sessionStartedAtMs,
+      },
     };
   }
 
@@ -559,6 +571,38 @@
       showModal();
     }
 
+    // Mount panel addons against their slots. Each addon's mount(ctx)
+    // returns optional { beforeSubmit, onPanelClose } hooks; we collect
+    // them for the submit orchestrator and the panel close cleanup.
+    const slotEls = new Map();  // slot name -> DOM element
+    root.querySelectorAll("[data-slot]").forEach((el) => {
+      slotEls.set(el.dataset.slot, el);
+    });
+
+    const addonHooks = [];  // [{ id, beforeSubmit?, onPanelClose? }]
+    const addonCloseCbs = [];
+
+    PANEL_ADDONS.forEach((addon) => {
+      const slotEl = slotEls.get(addon.slot);
+      if (!slotEl) {
+        console.warn(`[PhoenixReplay] addon "${addon.id}" requested unknown slot "${addon.slot}"`);
+        return;
+      }
+      try {
+        const ctx = {
+          slotEl,
+          sessionId: () => client._internals?.sessionId?.() ?? null,
+          sessionStartedAtMs: () => client._internals?.sessionStartedAtMs?.() ?? null,
+          onPanelClose: (cb) => addonCloseCbs.push(cb),
+          reportError: (msg) => { errorMessage.textContent = msg; setScreen(SCREENS.ERROR); showModal(); },
+        };
+        const hooks = addon.mount(ctx) || {};
+        addonHooks.push({ id: addon.id, ...hooks });
+      } catch (err) {
+        console.warn(`[PhoenixReplay] addon "${addon.id}" failed to mount: ${err.message}`);
+      }
+    });
+
     function close() {
       hideModal();
       form.reset();
@@ -567,6 +611,9 @@
       // the report form (backward-compat for `:continuous`). The init
       // orchestrator overrides via `openStart` when on-demand + idle.
       setScreen(SCREENS.FORM);
+      addonCloseCbs.forEach((cb) => {
+        try { cb(); } catch (err) { console.warn(`[PhoenixReplay] addon close hook failed: ${err.message}`); }
+      });
     }
 
     root.querySelectorAll(".phx-replay-cancel").forEach((el) => el.addEventListener("click", close));
