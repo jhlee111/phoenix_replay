@@ -505,6 +505,7 @@
               <span>What happened?</span>
               <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
             </label>
+            <div class="phx-replay-panel-addons" data-slot="form-top"></div>
             <label>
               <span>Severity</span>
               <select name="severity">
