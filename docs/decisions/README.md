@@ -9,6 +9,7 @@
 | [0003](./0003-session-continuity.md) | Session Continuity Across Page Loads | Accepted | 2026-04-23 |
 | [0004](./0004-live-session-watch.md) | Live Session Watch — Admin "Shoulder-Surf" | Accepted | 2026-04-24 |
 | [0005](./0005-replay-player-timeline-event-bus.md) | Replay Player Timeline Event Bus | Accepted | 2026-04-24 |
+| [0006](./0006-unified-feedback-entry.md) | Unified Feedback Entry — Client-Side Ring Buffer + Two-Path UX | Proposed | 2026-04-25 |
 
 ## Rules
 
