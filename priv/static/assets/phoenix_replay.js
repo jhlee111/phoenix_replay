@@ -47,6 +47,12 @@
   // ReferenceErrors rather than silent "nothing shows" bugs.
   const SCREENS = { IDLE_START: "idle_start", ERROR: "error", FORM: "form" };
 
+  // Panel addon registry. Each entry: { id, slot, mount }. `mount(ctx)` is
+  // invoked once per panel-mount; it returns optional { beforeSubmit,
+  // onPanelClose } hooks. The orchestrator collects beforeSubmit return
+  // values and merges all `extras` into the report() body.
+  const PANEL_ADDONS = new Map();  // id -> { id, slot, mount }
+
   // ---- transport ---------------------------------------------------------
 
   async function postJson(url, body, { csrfToken, sessionToken, tokenHeader, csrfHeader, gzip = false }) {
@@ -838,6 +844,16 @@
     isRecording() {
       const inst = firstInstance();
       return inst ? inst.client.isRecording() : false;
+    },
+
+    registerPanelAddon({ id, slot, mount }) {
+      if (typeof id !== "string" || id.length === 0) {
+        throw new Error("[PhoenixReplay] registerPanelAddon requires a string id");
+      }
+      if (typeof mount !== "function") {
+        throw new Error("[PhoenixReplay] registerPanelAddon requires a mount function");
+      }
+      PANEL_ADDONS.set(id, { id, slot: slot || "form-top", mount });
     },
 
     // Auto-mount helper: finds elements with [data-phoenix-replay] and
