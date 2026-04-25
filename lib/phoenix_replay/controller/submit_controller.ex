@@ -29,7 +29,8 @@ defmodule PhoenixReplay.SubmitController do
         "description" => Map.get(params, "description"),
         "severity" => Map.get(params, "severity"),
         "metadata" => merged_metadata,
-        "jam_link" => Map.get(params, "jam_link")
+        "jam_link" => Map.get(params, "jam_link"),
+        "extras" => stringify_keys(Map.get(params, "extras") || %{})
       }
 
       case Storage.Dispatch.submit(session_id, submit_params, identity) do
