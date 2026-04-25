@@ -57,7 +57,7 @@
   // end-to-end by the audio narration smoke flow in ash_feedback's Phase 2d
   // checklist. Add Vitest/JSDOM coverage when the recurring JS-test-infra
   // debt is paid (separate ADR).
-  const PANEL_ADDONS = new Map();  // id -> { id, slot, mount }
+  const PANEL_ADDONS = new Map();  // id -> { id, slot, mount, modes }
 
   // ---- transport ---------------------------------------------------------
 
@@ -589,7 +589,20 @@
     const addonHooks = [];  // [{ id, beforeSubmit?, onPanelClose? }]
     const addonCloseCbs = [];
 
+    // Recording mode for this widget. `cfg` already merges DEFAULTS so
+    // `cfg.recording` is always defined ("continuous" by default); the
+    // `|| "continuous"` is defense-in-depth in case a future caller passes
+    // an explicit undefined override into Object.assign.
+    const currentRecordingMode = () => cfg.recording || "continuous";
+
     PANEL_ADDONS.forEach((addon) => {
+      // Mode filter — addons that declare `modes` only mount when the
+      // widget's recording mode matches. Recording mode is read from
+      // `cfg.recording` (threaded through init from data-recording).
+      if (addon.modes && !addon.modes.includes(currentRecordingMode())) {
+        return;
+      }
+
       const slotEl = slotEls.get(addon.slot);
       if (!slotEl) {
         console.warn(`[PhoenixReplay] addon "${addon.id}" requested unknown slot "${addon.slot}"`);
@@ -921,14 +934,18 @@
       return inst ? inst.client.isRecording() : false;
     },
 
-    registerPanelAddon({ id, slot, mount }) {
+    registerPanelAddon({ id, slot, mount, modes }) {
       if (typeof id !== "string" || id.length === 0) {
         throw new Error("[PhoenixReplay] registerPanelAddon requires a string id");
       }
       if (typeof mount !== "function") {
         throw new Error("[PhoenixReplay] registerPanelAddon requires a mount function");
       }
-      PANEL_ADDONS.set(id, { id, slot: slot || "form-top", mount });
+      // `modes` opt: array of recording-mode strings the addon mounts on.
+      // Omitted = mount on any mode (backwards-compat default for existing addons).
+      // Example: { id: "audio", modes: ["on_demand"] } — mounts only on on-demand widgets.
+      const normalizedModes = Array.isArray(modes) && modes.length > 0 ? modes : null;
+      PANEL_ADDONS.set(id, { id, slot: slot || "form-top", mount, modes: normalizedModes });
     },
 
     // Auto-mount helper: finds elements with [data-phoenix-replay] and
