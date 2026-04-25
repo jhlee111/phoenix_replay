@@ -51,6 +51,12 @@
   // invoked once per panel-mount; it returns optional { beforeSubmit,
   // onPanelClose } hooks. The orchestrator collects beforeSubmit return
   // values and merges all `extras` into the report() body.
+  //
+  // TODO(js-test-infra): the registration → mount → beforeSubmit → extras
+  // pipeline has no JS unit test in this repo. The contract is exercised
+  // end-to-end by the audio narration smoke flow in ash_feedback's Phase 2d
+  // checklist. Add Vitest/JSDOM coverage when the recurring JS-test-infra
+  // debt is paid (separate ADR).
   const PANEL_ADDONS = new Map();  // id -> { id, slot, mount }
 
   // ---- transport ---------------------------------------------------------
