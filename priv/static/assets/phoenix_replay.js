@@ -504,14 +504,14 @@
         <div class="phx-replay-modal-backdrop"></div>
         <div class="phx-replay-modal-panel">
           <section class="phx-replay-screen phx-replay-screen--idle-start" data-screen="${SCREENS.IDLE_START}" hidden>
-            <h2>Start reproduction</h2>
+            <h2>Record and report</h2>
             <p class="phx-replay-screen-lede">
               Click <strong>Start</strong>, reproduce the issue, then click <strong>Stop</strong> in the recording pill.
               Nothing is captured until you start.
             </p>
             <div class="phx-replay-actions">
               <button type="button" class="phx-replay-cancel">Cancel</button>
-              <button type="button" class="phx-replay-start-cta">Start reproduction</button>
+              <button type="button" class="phx-replay-start-cta">Record and report</button>
             </div>
           </section>
 
