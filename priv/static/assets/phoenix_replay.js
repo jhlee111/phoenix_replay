@@ -626,11 +626,32 @@
       e.preventDefault();
       const data = new FormData(form);
       status.textContent = "Sending…";
+
+      // Run all addon beforeSubmit hooks in registration order, merging
+      // each returned `extras` into a single map. A throw aborts the
+      // submit and surfaces the error inline.
+      const merged = {};
+      try {
+        for (const hook of addonHooks) {
+          if (typeof hook.beforeSubmit !== "function") continue;
+          status.textContent = `Sending… (${hook.id})`;
+          const result = await hook.beforeSubmit({ formData: data });
+          if (result && result.extras && typeof result.extras === "object") {
+            Object.assign(merged, result.extras);
+          }
+        }
+      } catch (err) {
+        status.textContent = `Submit failed: ${err.message}`;
+        return;
+      }
+
+      status.textContent = "Sending…";
       try {
         await client.report({
           description: data.get("description"),
           severity: data.get("severity"),
           jamLink: data.get("jam_link") || null,
+          extras: merged,
         });
         status.textContent = "Thanks! Your report was submitted.";
         setTimeout(close, 1200);
