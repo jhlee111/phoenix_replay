@@ -42,6 +42,11 @@
   // events exceeds (expected by speed) by more than this much, treat
   // it as a seek. 500ms is well above RAF jitter at any speed.
   const SEEK_DELTA_THRESHOLD_MS = 500;
+  // Per-session subscribers registered via `subscribeTimeline`. Each
+  // entry: `{callback, intervalId, tickHz}`. State events fan out to
+  // every subscriber regardless of `tickHz`; tick events come from
+  // each subscriber's own interval (independent throttling).
+  const subscribers = new Map();
 
   async function initOne(el) {
     if (el[INITIALIZED]) return;
@@ -278,16 +283,105 @@
   }
 
   function dispatchTimeline(sessionId, kind, timecodeMs, speed) {
-    window.dispatchEvent(
-      new CustomEvent(TIMELINE_EVENT, {
-        detail: {
-          session_id: sessionId,
-          kind,
-          timecode_ms: typeof timecodeMs === "number" ? Math.round(timecodeMs) : 0,
-          speed: typeof speed === "number" ? speed : 1,
-        },
-      }),
+    const detail = {
+      session_id: sessionId,
+      kind,
+      timecode_ms: typeof timecodeMs === "number" ? Math.round(timecodeMs) : 0,
+      speed: typeof speed === "number" ? speed : 1,
+    };
+    // 1. Window CustomEvent — escape hatch for advanced consumers.
+    window.dispatchEvent(new CustomEvent(TIMELINE_EVENT, { detail }));
+    // 2. Per-session subscribers (via subscribeTimeline) — friendlier
+    //    path that handles per-subscriber tick rate.
+    notifySubscribers(sessionId, detail);
+  }
+
+  function notifySubscribers(sessionId, detail) {
+    const list = subscribers.get(sessionId);
+    if (!list || list.length === 0) return;
+    for (const sub of list) {
+      try {
+        sub.callback(detail);
+      } catch (err) {
+        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
+      }
+    }
+  }
+
+  function getPlayerForSession(sessionId) {
+    return (
+      replayPlayers.get(sessionId)?.player ||
+      livePlayers.get(sessionId)?.player ||
+      null
     );
+  }
+
+  // ADR-0005 Phase 2 — friendlier subscription helper. Most consumers
+  // should never need to talk to the raw `phoenix_replay:timeline`
+  // window event; subscribe here and get state events + a chosen tick
+  // cadence delivered straight to your callback.
+  //
+  //   const stop = PhoenixReplayAdmin.subscribeTimeline(sessionId, fn, {
+  //     tick_hz: 10,           // default; 0 disables ticks (state-only)
+  //     deliver_initial: true, // fire one :tick synchronously on subscribe
+  //   });
+  //   // ...later:
+  //   stop();
+  //
+  // Tick subscribers are independent — high-rate consumers don't pay
+  // for low-rate ones, and vice versa. State events (play/pause/seek/
+  // ended) reach every subscriber regardless of `tick_hz`.
+  function subscribeTimeline(sessionId, callback, opts = {}) {
+    if (!sessionId || typeof callback !== "function") {
+      console.warn("[PhoenixReplay] subscribeTimeline requires sessionId + callback");
+      return () => {};
+    }
+
+    const tickHz = typeof opts.tick_hz === "number" ? opts.tick_hz : 10;
+    const deliverInitial = opts.deliver_initial !== false;
+
+    const tick = () => {
+      const player = getPlayerForSession(sessionId);
+      if (!player) return;
+      let t = 0;
+      try {
+        const replayer = player.getReplayer?.();
+        const got = replayer?.getCurrentTime?.();
+        if (typeof got === "number") t = got;
+      } catch (_) {
+        return;
+      }
+      try {
+        callback({
+          session_id: sessionId,
+          kind: "tick",
+          timecode_ms: Math.round(t),
+          speed: 1,
+        });
+      } catch (err) {
+        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
+      }
+    };
+
+    const intervalId = tickHz > 0 ? setInterval(tick, 1000 / tickHz) : null;
+    const entry = { callback, intervalId, tickHz };
+
+    if (!subscribers.has(sessionId)) subscribers.set(sessionId, []);
+    subscribers.get(sessionId).push(entry);
+
+    // `tick_hz: 0` means "no tick events at all" — deliver_initial is
+    // a no-op in that case so the contract stays clean for state-only
+    // consumers (e.g. annotation logs).
+    if (deliverInitial && tickHz > 0) tick();
+
+    return function unsubscribe() {
+      if (entry.intervalId) clearInterval(entry.intervalId);
+      const list = subscribers.get(sessionId);
+      if (!list) return;
+      const idx = list.indexOf(entry);
+      if (idx >= 0) list.splice(idx, 1);
+      if (list.length === 0) subscribers.delete(sessionId);
+    };
   }
 
   function initAll(root = document) {
@@ -333,5 +427,5 @@
     observe();
   }
 
-  global.PhoenixReplayAdmin = { initAll, initOne };
+  global.PhoenixReplayAdmin = { initAll, initOne, subscribeTimeline };
 })(window);

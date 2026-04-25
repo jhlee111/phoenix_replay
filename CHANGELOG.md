@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replay player timeline event bus — Phase 2 (ADR-0005). Friendlier
+  subscription helper on top of the Phase 1 window bus.
+  - `window.PhoenixReplayAdmin.subscribeTimeline(sessionId, callback,
+    opts)` returns an `unsubscribe` function. Callback receives the
+    same `{session_id, kind, timecode_ms, speed}` payload as the
+    window event.
+  - `opts.tick_hz` (default `10`, `0` disables ticks) controls the
+    `kind: "tick"` cadence per subscriber. Subscribers throttle
+    independently — high-rate consumers don't tax low-rate ones.
+  - `opts.deliver_initial` (default `true`) fires one `:tick`
+    synchronously on subscribe so consumers don't render blank until
+    the first interval.
+  - State events (`play`/`pause`/`seek`/`ended`) reach every
+    subscriber regardless of `tick_hz`.
 - Replay player timeline event bus — Phase 1 (ADR-0005). The replay
   player now broadcasts state-change events to the window so any
   consumer on the page can sync with playback (audio narration, LV
