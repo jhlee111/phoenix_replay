@@ -1,6 +1,6 @@
 # Plan: Replay Player Timeline Event Bus
 
-**Status**: Proposal — pending ADR-0005 acceptance
+**Status**: Active — Phase 1 in progress
 **Drafted**: 2026-04-24
 **ADR**: [0005-replay-player-timeline-event-bus](../../decisions/0005-replay-player-timeline-event-bus.md)
 
@@ -157,7 +157,7 @@ consumers) can wire in without spelunking through `player_hook.js`.
 - [ ] **OQ3** — `setInterval` anchor (wall-clock). RAF rejected
       due to hidden-tab throttling.
 
-Promote this proposal to `active/` once ADR-0005 is Accepted.
+Promoted to `active/` 2026-04-24 (ADR-0005 Accepted).
 
 ## Follow-ups (separate plans)
 

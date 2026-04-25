@@ -27,6 +27,21 @@
   // `pending` buffers live appends that arrive before the player is
   // initialized (e.g. rrweb-player script still loading).
   const livePlayers = new Map();
+  // Per-session one-shot replay player registry — captures the
+  // rrweb-player instance for the timeline event bus (ADR-0005). Live
+  // players already track their instance under `livePlayers`.
+  const replayPlayers = new Map();
+
+  // ADR-0005 timeline event bus — emits state-change events to the
+  // window for any consumer to observe (audio sync, LV state debugger,
+  // overlays, etc). See `wireTimelineBus` for what we attach to and
+  // `dispatchTimeline` for the payload shape.
+  const TIMELINE_EVENT = "phoenix_replay:timeline";
+  // Heuristic for detecting user scrub vs. natural playback: if the
+  // current-time delta between two consecutive ui-update-current-time
+  // events exceeds (expected by speed) by more than this much, treat
+  // it as a seek. 500ms is well above RAF jitter at any speed.
+  const SEEK_DELTA_THRESHOLD_MS = 500;
 
   async function initOne(el) {
     if (el[INITIALIZED]) return;
@@ -68,7 +83,7 @@
       }
 
       el.textContent = "";
-      new Player({
+      const player = new Player({
         target: el,
         props: {
           events,
@@ -79,6 +94,10 @@
           maxScale: 1,
         },
       });
+
+      const sessionId = el.getAttribute("data-session-id") || el.id;
+      replayPlayers.set(sessionId, { el, player });
+      wireTimelineBus(player, sessionId);
     } catch (err) {
       console.error("[PhoenixReplay] player init failed:", err);
       el.textContent = `Replay error: ${err.message}`;
@@ -140,6 +159,7 @@
       },
     });
     state.initialized = true;
+    wireTimelineBus(state.player, sessionId);
 
     // Flush appends buffered during the init window.
     if (state.pending.length > 0) {
@@ -190,6 +210,84 @@
     // order can briefly race on initial page load.
     await new Promise((r) => setTimeout(r, 50));
     return probe();
+  }
+
+  // ADR-0005 Phase 1 — attach state-change listeners and dispatch
+  // window CustomEvents on the timeline bus. Tick events + the
+  // `subscribeTimeline` helper land in Phase 2.
+  function wireTimelineBus(player, sessionId) {
+    if (!player || !sessionId) return;
+
+    let speed = 1;
+    let lastTimeMs = 0;
+    let lastTimeStamp = performance.now();
+    let lastDispatchedKind = null;
+
+    const emit = (kind, timecodeMs) =>
+      dispatchTimeline(sessionId, kind, timecodeMs, speed);
+
+    // play / pause come through the same event with a string payload.
+    // rrweb-player fires "playing" | "paused" | "live"; we only care
+    // about the first two for the public bus.
+    player.addEventListener("ui-update-player-state", (payload) => {
+      const state = typeof payload === "string" ? payload : payload?.payload;
+      if (state === "playing" && lastDispatchedKind !== "play") {
+        lastDispatchedKind = "play";
+        // Re-anchor the wall-clock so the first ui-update-current-time
+        // after resume isn't compared against an elapsed-during-pause
+        // wallElapsed (which would falsely trip the seek heuristic).
+        lastTimeStamp = performance.now();
+        emit("play", lastTimeMs);
+      } else if (state === "paused" && lastDispatchedKind !== "pause") {
+        lastDispatchedKind = "pause";
+        emit("pause", lastTimeMs);
+      }
+    });
+
+    // Current-time updates fire at RAF cadence while playing. Use them
+    // to (a) keep `lastTimeMs` fresh for state-change payloads, and
+    // (b) detect user scrubs as discontinuities exceeding what `speed`
+    // would predict for the wall-clock elapsed since the last update.
+    player.addEventListener("ui-update-current-time", (payload) => {
+      const t = typeof payload === "number" ? payload : payload?.payload;
+      if (typeof t !== "number") return;
+
+      const now = performance.now();
+      const wallElapsed = now - lastTimeStamp;
+      const expectedDelta = wallElapsed * speed;
+      const actualDelta = t - lastTimeMs;
+      const drift = Math.abs(actualDelta - expectedDelta);
+
+      if (lastTimeMs > 0 && drift > SEEK_DELTA_THRESHOLD_MS) {
+        emit("seek", t);
+      }
+
+      lastTimeMs = t;
+      lastTimeStamp = now;
+    });
+
+    // `replayer.on("finish")` is the canonical end-of-playback signal.
+    // Guard with try/catch — on alpha builds the replayer may not be
+    // ready synchronously after Player construction.
+    try {
+      const replayer = player.getReplayer?.();
+      replayer?.on?.("finish", () => emit("ended", lastTimeMs));
+    } catch (_) {
+      /* replayer not ready; ended event simply won't fire */
+    }
+  }
+
+  function dispatchTimeline(sessionId, kind, timecodeMs, speed) {
+    window.dispatchEvent(
+      new CustomEvent(TIMELINE_EVENT, {
+        detail: {
+          session_id: sessionId,
+          kind,
+          timecode_ms: typeof timecodeMs === "number" ? Math.round(timecodeMs) : 0,
+          speed: typeof speed === "number" ? speed : 1,
+        },
+      }),
+    );
   }
 
   function initAll(root = document) {

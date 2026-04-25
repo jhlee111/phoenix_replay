@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replay player timeline event bus — Phase 1 (ADR-0005). The replay
+  player now broadcasts state-change events to the window so any
+  consumer on the page can sync with playback (audio narration, LV
+  state debuggers, network-timeline overlays, etc).
+  - New window `CustomEvent` channel `phoenix_replay:timeline` with
+    payload `{session_id, kind, timecode_ms, speed}`.
+  - Event kinds: `play`, `pause`, `seek`, `ended`. Tick events plus a
+    `subscribeTimeline` helper land in Phase 2.
+  - Both one-shot replay players (`<.replay_player />`) and live-mode
+    players (`PhoenixReplay.Live.SessionWatch`) emit on the bus.
+  - `<.replay_player>` accepts an optional `session_id` attr that
+    scopes its timeline events; falls back to the element id when
+    omitted.
 - Igniter-based installer (Phase 5f). `mix igniter.install phoenix_replay`
   now patches the host project end-to-end:
   - `:phoenix_replay` config block in `config/config.exs` with TODO-

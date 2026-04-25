@@ -318,7 +318,7 @@ defmodule PhoenixReplay.UI.Components do
 
       <section :if={not @hide_player} class="phx-replay-detail-player-section">
         <h3>Replay</h3>
-        <.replay_player events_url={@events_url} />
+        <.replay_player events_url={@events_url} session_id={entry_session_id(@entry)} />
       </section>
     </div>
     """
@@ -326,12 +326,17 @@ defmodule PhoenixReplay.UI.Components do
 
   attr :id, :string, default: nil
   attr :events_url, :string, required: true
+  attr :session_id, :string, default: nil
   attr :height, :integer, default: 560
 
   @doc """
   Renders the rrweb-player mount point. The auto-init script shipped
   by `<.phoenix_replay_admin_assets />` detects this element (including
   on LiveView DOM patches) and initializes rrweb-player in place.
+
+  Pass `session_id` so the player participates in the
+  `phoenix_replay:timeline` event bus (ADR-0005). When omitted the
+  bus uses the element id as a fallback scope.
   """
   def replay_player(assigns) do
     assigns = Map.put_new(assigns, :id, "phx-replay-player-#{:erlang.unique_integer([:positive])}")
@@ -341,6 +346,7 @@ defmodule PhoenixReplay.UI.Components do
       id={@id}
       data-phoenix-replay-player
       data-events-url={@events_url}
+      data-session-id={@session_id}
       data-height={@height}
       class="phx-replay-player"
       phx-update="ignore"

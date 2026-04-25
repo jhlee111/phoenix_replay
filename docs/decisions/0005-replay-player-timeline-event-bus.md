@@ -1,6 +1,6 @@
 # ADR-0005: Replay Player Timeline Event Bus
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-04-24
 **Builds on**: ADR-0004 (Live Session Watch)
 
