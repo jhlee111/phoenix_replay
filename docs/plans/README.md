@@ -10,6 +10,7 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 | # | Phase | Status | File |
 |---|-------|--------|------|
 | —  | Replay player timeline event bus (ADR-0005) | Phases 1 + 2 shipped; Phase 3 (docs) next | [active/2026-04-24-timeline-event-bus.md](active/2026-04-24-timeline-event-bus.md) |
+| —  | Mode-aware panel addons + Path A/B IA | Shipped 2026-04-25 — `registerPanelAddon({modes})`, Path B trigger renamed | [`docs/superpowers/specs/2026-04-25-mode-aware-panel-addons.md`](../superpowers/specs/2026-04-25-mode-aware-panel-addons.md) / [plan](../superpowers/plans/2026-04-25-mode-aware-panel-addons.md) |
 | 6  | Hex publish | deferred | — |
 
 ## Proposals (drafted, not yet committed)
