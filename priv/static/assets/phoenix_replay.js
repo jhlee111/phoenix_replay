@@ -47,8 +47,8 @@
   // ReferenceErrors rather than silent "nothing shows" bugs.
   const SCREENS = { IDLE_START: "idle_start", ERROR: "error", FORM: "form" };
 
-  // Panel addon registry. Each entry: { id, slot, mount }. `mount(ctx)` is
-  // invoked once per panel-mount; it returns optional { beforeSubmit,
+  // Panel addon registry. Each entry: { id, slot, mount, modes }. `mount(ctx)`
+  // is invoked once per panel-mount; it returns optional { beforeSubmit,
   // onPanelClose } hooks. The orchestrator collects beforeSubmit return
   // values and merges all `extras` into the report() body.
   //

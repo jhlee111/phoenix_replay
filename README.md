@@ -497,6 +497,42 @@ window.PhoenixReplay.registerPanelAddon({
 });
 ```
 
+### Options
+
+- `id` (required, string) — unique identifier for the addon.
+- `slot` (optional, string) — DOM slot to mount into. Only `"form-top"` is
+  supported today; defaults to `"form-top"`.
+- `mount` (required, function) — called once per panel mount with the context
+  object documented above. Returns optional `beforeSubmit` / `onPanelClose`
+  callbacks.
+- `modes` (optional, array of strings) — recording-mode strings the addon
+  mounts on (e.g., `["on_demand"]`). When present, the addon is skipped for
+  widgets whose `recording` value isn't in the list. Default (omitted): mount
+  on any recording mode. Filter operates on recording mode only; control style
+  (`:float` / `:headless`) is independent.
+
+  Example — an addon that's only meaningful on on-demand recordings:
+
+  ```javascript
+  PhoenixReplay.registerPanelAddon({
+    id: "audio",
+    modes: ["on_demand"],
+    mount: (ctx) => { /* ... */ },
+  });
+  ```
+
+### Recording modes — symbol ↔ user-facing name
+
+| Symbol | User-facing name | When to use |
+|---|---|---|
+| `:continuous` | Quick report mode | Cached event buffer; user reports after the fact (Path A — no audio commentary, replay timeline predates any voice note by minutes) |
+| `:on_demand` | Record-and-report mode | Recording starts on user click; supports voice commentary (Path B — rrweb + audio start at the same moment, sync is meaningful) |
+
+(`:headless` is a control style — `:float` vs `:headless` — not a recording mode.
+It composes with either of the above. The addon `modes` filter operates on
+recording mode only, so a `:headless` + `:on_demand` widget mounts on-demand
+addons normally.)
+
 The Storage adapter sees the merged extras under `submit_params["extras"]`:
 
 ```elixir

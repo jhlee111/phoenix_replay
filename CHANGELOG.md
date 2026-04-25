@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Mode-aware panel addons (2026-04-25)
+
+- `registerPanelAddon` accepts an optional `modes` array. When present, the addon
+  mounts only on widgets whose configured `recording` value (`:continuous` /
+  `:on_demand`) is in the list. Omitting `modes` preserves the previous behavior
+  (mount on any widget). Filter operates on recording mode only — control style
+  (`:float` / `:headless`) is independent.
+- The Path B trigger label changed from "Start reproduction" to "Record and report"
+  for plainer end-user language. Code symbols (`:continuous` / `:on_demand` /
+  `:headless`) and routes are unchanged.
+
+Smoke verified in Chrome on the ash_feedback_demo continuous + on-demand-float +
+on-demand-headless pages — see Phase 1.5 smoke matrix in
+`docs/superpowers/plans/2026-04-25-mode-aware-panel-addons.md`.
+
 ### Added
 
 - Panel addon API: `window.PhoenixReplay.registerPanelAddon({ id, slot, mount })`

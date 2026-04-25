@@ -354,7 +354,7 @@ Navigate to `http://localhost:4006/demo/on-demand-headless`. Verify:
 |---|---|---|
 | H1 | Page heading | "Record-and-report mode (`:on_demand` headless control)" |
 | H2 | Manual control buttons (`startRecording()` / `stopRecording()`) | Still work |
-| H3 | Audio addon button | Does NOT render in this mode (`:headless` not in the audio addon's `modes` list) — note: this is intentional per spec D3 |
+| H3 | Audio addon button | DOES render — `modes: ["on_demand"]` filters by recording mode, not control style. Headless + on_demand widgets are valid audio hosts. See spec addendum 2026-04-25. |
 
 - [ ] **Step 6: If any smoke step fails, STOP and report**
 

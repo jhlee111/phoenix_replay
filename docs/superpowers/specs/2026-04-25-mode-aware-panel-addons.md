@@ -153,3 +153,28 @@ Single phase; tasks split across three repos.
 ## Addendum trigger
 
 If implementation surfaces facts that contradict the above (e.g., panel-addon API has constraints we missed, or the user wants a different label on review), append an addendum here rather than silently revising — same convention ash_feedback Phase 2/3 used.
+
+## Addendum 2026-04-25 — D3 corrected post-implementation
+
+The original D3 text said "addons that don't list `:headless` simply don't
+auto-mount on headless widgets". This conflated two independent dimensions:
+
+- **recording mode** — `:continuous` vs `:on_demand` (whether events buffer
+  passively or recording starts on user action)
+- **control style** — `:float` vs `:headless` (whether the widget renders its
+  own toggle UI or the host drives lifecycle programmatically)
+
+Implementation revealed they are orthogonal. The `modes` filter operates on
+**recording mode only**; control style is independent. A widget with
+`mode: :headless, recording: :on_demand` mounts the audio addon (because
+`recording` matches `["on_demand"]`) — and this is correct, because audio's
+meaningfulness is determined by the recording lifecycle, not by who calls
+start/stop.
+
+**Revised D3:** `:headless` is excluded from `modes` classification because it's
+not a recording mode. Hosts driving the headless control style get whichever
+addons match the widget's recording mode; if a host wants further filtering it
+can wire its own UI without registering the library addon.
+
+The 1.5 smoke matrix's H3 row is corrected accordingly: audio addon DOES render
+on headless + on_demand widgets. The plan was updated to match.
