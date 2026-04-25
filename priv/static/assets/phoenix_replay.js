@@ -954,10 +954,17 @@
 
   if (typeof global !== "undefined") global.PhoenixReplay = PhoenixReplay;
   if (typeof document !== "undefined") {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", PhoenixReplay.autoMount);
-    } else {
+    // Defer to DOMContentLoaded even when readyState is already
+    // "interactive" — defer scripts execute *before* DOMContentLoaded
+    // fires, so a registerPanelAddon call from a later defer script
+    // (e.g. ash_feedback/audio_recorder.js) needs autoMount to wait
+    // until all defer scripts have run. Scheduling to DOMContentLoaded
+    // guarantees that ordering. If we land after the event has already
+    // fired (state "complete"), mount immediately.
+    if (document.readyState === "complete") {
       PhoenixReplay.autoMount();
+    } else {
+      document.addEventListener("DOMContentLoaded", PhoenixReplay.autoMount, { once: true });
     }
   }
 })(typeof window !== "undefined" ? window : globalThis);
