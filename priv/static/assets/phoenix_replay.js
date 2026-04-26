@@ -628,6 +628,31 @@
     return promises.length ? Promise.all(promises).then(() => {}) : Promise.resolve();
   }
 
+  // Run pre-flight Start checks in registration order. Each hook is
+  // [id, async () => ({ok: true} | {ok: false, error})]. First failure
+  // (returned ok:false OR a thrown exception) short-circuits and the
+  // failing hook's id is threaded back as `failingId` so the caller
+  // can target an inline-error region. An empty hook list returns
+  // ok:true — addons opt in by registering via panel.registerCanStart.
+  async function runCanStartHooks(hooks) {
+    for (const [id, fn] of hooks) {
+      let result;
+      try {
+        result = await fn();
+      } catch (err) {
+        result = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+      if (!result || result.ok === false) {
+        return {
+          ok: false,
+          error: (result && result.error) || "Pre-flight check failed.",
+          failingId: id,
+        };
+      }
+    }
+    return { ok: true };
+  }
+
   // ---- widget UI ---------------------------------------------------------
 
   // The panel (modal + multi-screen body) is created in both :float and
@@ -931,6 +956,12 @@
     // their cleanup function (if any) for unmount.
     const slotState = new Map();
 
+    // Pre-Start checks. Each entry is [id, async () => ({ok: true} | {ok: false, error})].
+    // Hooks run in registration order; first failure short-circuits.
+    // Addons typically register from inside their idle-start-options
+    // mount fn via ctx.panel.registerCanStart(id, fn).
+    const canStartHooks = [];
+
     function ensureSlotState(slotName) {
       if (!slotState.has(slotName)) slotState.set(slotName, new Map());
       return slotState.get(slotName);
@@ -943,6 +974,25 @@
         sessionStartedAtMs: () => client._internals?.sessionStartedAtMs?.() ?? null,
         onPanelClose: (cb) => addonCloseCbs.push(cb),
         reportError: (msg) => { errorMessage.textContent = msg; setScreen(SCREENS.ERROR); showModal(); },
+        // Panel surface available to addon mount fns. Lets addons register
+        // pre-Start checks (registerCanStart) and surface errors inline
+        // (showInlineError / clearInlineError) without touching the modal
+        // chrome. Mirrors the keys exposed on the panel return object.
+        panel: {
+          registerCanStart: (id, fn) => {
+            const idx = canStartHooks.findIndex(([existingId]) => existingId === id);
+            if (idx !== -1) canStartHooks[idx] = [id, fn];
+            else canStartHooks.push([id, fn]);
+          },
+          unregisterCanStart: (id) => {
+            const idx = canStartHooks.findIndex(([existingId]) => existingId === id);
+            if (idx !== -1) canStartHooks.splice(idx, 1);
+          },
+          showInlineError,
+          clearInlineError,
+          disableStart,
+          enableStart,
+        },
       };
     }
 
@@ -1163,6 +1213,16 @@
       clearInlineError,
       disableStart,
       enableStart,
+      registerCanStart: (id, fn) => {
+        const idx = canStartHooks.findIndex(([existingId]) => existingId === id);
+        if (idx !== -1) canStartHooks[idx] = [id, fn];
+        else canStartHooks.push([id, fn]);
+      },
+      unregisterCanStart: (id) => {
+        const idx = canStartHooks.findIndex(([existingId]) => existingId === id);
+        if (idx !== -1) canStartHooks.splice(idx, 1);
+      },
+      runCanStart: () => runCanStartHooks(canStartHooks),
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
       onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
@@ -1383,6 +1443,14 @@
       // of an unhandled rejection — clicking Start must never silently
       // do nothing.
       async function handleStartFromPanel() {
+        panel.disableStart();
+        panel.clearInlineError();
+        const check = await panel.runCanStart();
+        panel.enableStart();
+        if (!check.ok) {
+          panel.showInlineError("idle-start-options", check.error);
+          return;
+        }
         try {
           await startAndSync();
           panel.close();
@@ -1646,7 +1714,7 @@
 
   // Internal factory exposed only for tests. Do not use from host code —
   // the surface may change without a CHANGELOG entry.
-  PhoenixReplay._testInternals = { createRingBuffer, collectCleanupResults };
+  PhoenixReplay._testInternals = { createRingBuffer, collectCleanupResults, runCanStartHooks };
 
   if (typeof global !== "undefined") global.PhoenixReplay = PhoenixReplay;
   if (typeof document !== "undefined") {

@@ -63,5 +63,58 @@ function assert(cond, msg) {
     assert(bRan, "sibling cleanup ran despite earlier throw");
   }
 
+  // canStart registry: empty → ok
+  {
+    const sb2 = makeSandbox();
+    const { runCanStartHooks } = sb2.window.PhoenixReplay._testInternals;
+    const result = await runCanStartHooks([]);
+    assert(result.ok === true, "empty hook list returns ok:true");
+  }
+
+  // single hook ok
+  {
+    const sb2 = makeSandbox();
+    const { runCanStartHooks } = sb2.window.PhoenixReplay._testInternals;
+    const result = await runCanStartHooks([
+      ["audio", async () => ({ ok: true })],
+    ]);
+    assert(result.ok === true, "single ok hook returns ok:true");
+  }
+
+  // single hook fails → error threaded through with failingId
+  {
+    const sb2 = makeSandbox();
+    const { runCanStartHooks } = sb2.window.PhoenixReplay._testInternals;
+    const result = await runCanStartHooks([
+      ["audio", async () => ({ ok: false, error: "Mic blocked." })],
+    ]);
+    assert(result.ok === false, "failing hook returns ok:false");
+    assert(result.error === "Mic blocked.", "error message threaded through");
+    assert(result.failingId === "audio", "failingId identifies the hook");
+  }
+
+  // ok + fail → fail wins (first failure short-circuits)
+  {
+    const sb2 = makeSandbox();
+    const { runCanStartHooks } = sb2.window.PhoenixReplay._testInternals;
+    const result = await runCanStartHooks([
+      ["zzz", async () => ({ ok: true })],
+      ["audio", async () => ({ ok: false, error: "Nope." })],
+    ]);
+    assert(result.ok === false, "any failure makes overall fail");
+    assert(result.failingId === "audio", "fail propagates");
+  }
+
+  // throwing hook is caught and treated as ok:false
+  {
+    const sb2 = makeSandbox();
+    const { runCanStartHooks } = sb2.window.PhoenixReplay._testInternals;
+    const result = await runCanStartHooks([
+      ["audio", async () => { throw new Error("getUserMedia failed"); }],
+    ]);
+    assert(result.ok === false, "throw becomes ok:false");
+    assert(typeof result.error === "string" && result.error.length > 0, "error message present");
+  }
+
   console.log("canstart_hook_test: ok");
 })();
