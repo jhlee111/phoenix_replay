@@ -18,7 +18,7 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 
 _None._
 
-Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4), ADR-0004 Phase 3 (reusable `<.session_watch>` / `<.sessions_index>` components for power users — deferred until a real consumer needs them).
+Open follow-ups (no plan file yet): session-abandonment dashboard, JS test infrastructure (Playwright/Puppeteer — recurring debt across ADR-0001/2/3/4), ADR-0004 Phase 3 (reusable `<.session_watch>` / `<.sessions_index>` components for power users — deferred until a real consumer needs them), README addon-API doc refresh (Options section still claims `slot: "form-top"` is the only supported slot; Phase 3 added `pill-action` + `review-media` but the prose was never updated; flagged in ADR-0006 Phase 4 review 2026-04-26).
 
 ## Completed phases (historical)
 
