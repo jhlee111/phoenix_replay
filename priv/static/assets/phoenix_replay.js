@@ -1391,9 +1391,9 @@
       );
     },
 
-    // Canonical name for opening the panel — same routing as open().
-    // Hosts wiring keyboard shortcuts or dropdown items should prefer
-    // openPanel(); open() remains as a deprecated-but-supported alias.
+    // Canonical name for opening the panel. Routes per the widget's
+    // allow_paths: both → CHOOSE screen; report_now-only → Path A
+    // submit form directly; record_and_report-only → Path B start.
     openPanel() {
       const inst = firstInstance();
       if (inst) inst.routedOpen();
@@ -1468,6 +1468,8 @@
       // would mount the addon on every path (the legacy gate is gone),
       // which is a worse failure than a loud rejection. The throw
       // names the canonical replacement so the migration is one line.
+      // The `modes` parameter intentionally stays in the destructuring
+      // signature above — that's how we detect callers still passing it.
       if (modes !== undefined) {
         throw new Error(
           "[PhoenixReplay] registerPanelAddon: the `modes:` filter was " +
