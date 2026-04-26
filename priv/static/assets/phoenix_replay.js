@@ -646,6 +646,8 @@
               Click <strong>Start</strong>, reproduce the issue, then click <strong>Stop</strong> in the recording pill.
               Nothing is captured until you start.
             </p>
+            <div class="phx-replay-screen-options" data-slot="idle-start-options"></div>
+            <div class="phx-replay-inline-error" data-slot-error="idle-start-options" hidden></div>
             <div class="phx-replay-actions">
               <button type="button" class="phx-replay-cancel">Cancel</button>
               <button type="button" class="phx-replay-start-cta">Record and report</button>
