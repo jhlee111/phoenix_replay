@@ -1,6 +1,6 @@
 # Plan: Replay Player Timeline Event Bus
 
-**Status**: Active — Phases 1 + 2 shipped (commits `0a66fab`, `777d3b0`); Phase 3 (docs) next
+**Status**: Shipped — Phases 1 + 2 + 3 complete
 **Drafted**: 2026-04-24
 **ADR**: [0005-replay-player-timeline-event-bus](../../decisions/0005-replay-player-timeline-event-bus.md)
 
@@ -126,8 +126,8 @@ consumers) can wire in without spelunking through `player_hook.js`.
 
 **DoD**
 
-- [ ] README section + new guide file.
-- [ ] Linked from `docs/guides/` index (if there is one) or top of
+- [x] README section + new guide file.
+- [x] Linked from `docs/guides/` index (if there is one) or top of
       README docs section.
 
 ## Risks & rollback

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0005 Phase 3 — Timeline event bus docs (2026-04-26)
+
+The replay player's window-event channel and `subscribeTimeline`
+helper now have first-class documentation:
+
+- New guide `docs/guides/timeline-event-bus.md` — full reference for
+  every event kind, payload shape, subscriber API, lifecycle, and
+  the four use cases ADR-0005 enumerated (audio sync, debugger
+  overlays, transcripts, custom playback UI).
+- README gains a short "Subscribe to player timeline events
+  (optional)" section linking to the guide with a minimal
+  worked example.
+
+No code changes. Phase 1 (`0a66fab`) shipped the window-event
+channel; Phase 2 (`777d3b0`) shipped the `subscribeTimeline`
+helper. Phase 3 closes the ADR by making both surfaces
+discoverable.
+
 ### ADR-0006 Phase 4 — drop `modes:` shim + `open()` alias (2026-04-26)
 
 Removes the two transitional symbols the unified-entry rollout left
