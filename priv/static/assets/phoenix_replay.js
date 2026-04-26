@@ -1076,12 +1076,41 @@
       return client;
     },
 
-    // Open the first mounted panel. Usable from host JS, dropdown menu
-    // items, keyboard shortcuts, etc. No-op if no widget is mounted.
-    // Routes to the Start CTA when the widget is :on_demand and idle.
+    // Open the first mounted panel. Routes per the widget's
+    // allow_paths: both → CHOOSE screen; report_now-only → Path A
+    // submit form directly; record_and_report-only → Path B start.
+    // Backwards-compat alias for openPanel(); the existing
+    // [data-phoenix-replay-trigger] delegated listener keeps working
+    // unchanged because it routes through inst.routedOpen().
     open() {
       const inst = firstInstance();
       if (inst) inst.routedOpen();
+    },
+
+    // Canonical name for opening the panel — same routing as open().
+    // Hosts wiring keyboard shortcuts or dropdown items should prefer
+    // openPanel(); open() remains as a deprecated-but-supported alias.
+    openPanel() {
+      const inst = firstInstance();
+      if (inst) inst.routedOpen();
+    },
+
+    // Skip the entry panel and open Path A's submit form directly.
+    // Useful for hosts wiring a "Report a bug" header link that should
+    // bypass the two-option choice. No-op if no widget is mounted.
+    reportNow() {
+      const inst = firstInstance();
+      if (inst) inst.panel.openPathAForm();
+    },
+
+    // Skip the entry panel and start Path B (Record and report)
+    // immediately — opens the session, starts rrweb, swaps to the
+    // recording pill. Useful for header buttons that always mean
+    // "I want to record this." Returns a promise that rejects on
+    // session handshake failure.
+    recordAndReport() {
+      const inst = firstInstance();
+      return inst ? inst.startAndSync() : Promise.resolve();
     },
 
     // Close the first mounted panel. Usable from host JS after triggering
