@@ -110,6 +110,17 @@ AshStorage, Phase 2) already records `audio_start_offset_ms` on the
 blob — the in-flight toggle is the surface where that offset becomes
 non-zero, and the playback sync from Phase 3 already handles it.
 
+> **2026-04-26 reversal:** option (2) was implemented but caused
+> three problems in practice — multi-toggle ambiguity (only the last
+> clip survived), `audio_start_offset_ms` complexity at every layer,
+> and a Stop-while-recording timing race that left review previews
+> blank. Reversed in favour of option (1) (pre-flight checkbox on a
+> new `idle-start-options` slot). Audio is now session-equivalent;
+> `audio_start_offset_ms` was dropped end-to-end. See
+> ash_feedback's
+> [`docs/superpowers/specs/2026-04-26-audio-pre-flight-toggle-design.md`](../../../ash_feedback/docs/superpowers/specs/2026-04-26-audio-pre-flight-toggle-design.md)
+> for the full reasoning.
+
 ## Question D — severity in the user-facing form
 
 The Feedback resource (in `ash_feedback`) has a `severity` attribute.

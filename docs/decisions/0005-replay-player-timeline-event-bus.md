@@ -4,6 +4,17 @@
 **Date**: 2026-04-24
 **Builds on**: ADR-0004 (Live Session Watch)
 
+> **2026-04-26 update (phoenix_replay@2074a12):** the bus implementation
+> moved from `priv/static/assets/player_hook.js` (admin-only) into
+> `priv/static/assets/phoenix_replay.js`, where it's exposed on
+> `window.PhoenixReplay.subscribeTimeline / wireTimelineBus /
+> registerPlayer`. `player_hook.js` now delegates to those helpers.
+> Reason: the panel mini-player (review modal in user-facing pages)
+> needs to publish on the same bus so review-media addons can sync
+> audio without an admin-only dependency. Public surface is unchanged
+> for existing admin consumers — `PhoenixReplayAdmin.subscribeTimeline`
+> stays as a delegating alias.
+
 ## Context
 
 The replay player today is a one-way black box: it consumes an
