@@ -9,6 +9,12 @@ defmodule PhoenixReplay.ReportControllerTest do
   @identity %{kind: :user, id: "u-test", attrs: %{}}
 
   setup do
+    # RateLimiter is already started by the application supervisor
+    # (see PhoenixReplay.Application). Just reset its ETS state so
+    # buckets don't leak across tests in this :async false suite —
+    # mirrors RateLimiterTest.
+    PhoenixReplay.RateLimiter.reset()
+
     start_supervised!(RecordingStorage)
 
     prior_storage = Application.get_env(:phoenix_replay, :storage)
@@ -171,6 +177,56 @@ defmodule PhoenixReplay.ReportControllerTest do
       # detail must be a structured map, never an inspect-string
       assert is_map(body["detail"])
       refute is_binary(body["detail"]) and String.contains?(body["detail"], "Ecto.Changeset")
+    end
+
+    test "429 after report_rate_per_minute hits in a single window", %{conn: conn} do
+      prior_limits = Application.get_env(:phoenix_replay, :limits)
+      Application.put_env(:phoenix_replay, :limits, report_rate_per_minute: 3)
+
+      on_exit(fn ->
+        case prior_limits do
+          nil -> Application.delete_env(:phoenix_replay, :limits)
+          v -> Application.put_env(:phoenix_replay, :limits, v)
+        end
+      end)
+
+      # 3 requests must succeed; the 4th must 429 with a retry-after header.
+      for _ <- 1..3 do
+        ok_conn = PhoenixReplay.ReportController.create(conn, %{"description" => "ok"})
+        assert ok_conn.status == 201
+      end
+
+      blocked = PhoenixReplay.ReportController.create(conn, %{"description" => "blocked"})
+
+      assert blocked.status == 429
+      assert %{"error" => "rate_limited"} = json_response(blocked, 429)
+      assert [retry] = Plug.Conn.get_resp_header(blocked, "retry-after")
+      assert {n, _} = Integer.parse(retry)
+      assert n > 0 and n <= 60
+    end
+
+    test "different actors have independent buckets", %{conn: conn} do
+      prior_limits = Application.get_env(:phoenix_replay, :limits)
+      Application.put_env(:phoenix_replay, :limits, report_rate_per_minute: 1)
+
+      on_exit(fn ->
+        case prior_limits do
+          nil -> Application.delete_env(:phoenix_replay, :limits)
+          v -> Application.put_env(:phoenix_replay, :limits, v)
+        end
+      end)
+
+      conn_b =
+        build_conn()
+        |> put_req_header("content-type", "application/json")
+        |> assign(:phoenix_replay_identity, %{kind: :user, id: "u-other", attrs: %{}})
+        |> Phoenix.Controller.accepts(["json"])
+
+      ok_a = PhoenixReplay.ReportController.create(conn, %{"description" => "actor a"})
+      ok_b = PhoenixReplay.ReportController.create(conn_b, %{"description" => "actor b"})
+
+      assert ok_a.status == 201
+      assert ok_b.status == 201
     end
   end
 end

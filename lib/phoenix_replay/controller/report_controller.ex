@@ -17,17 +17,18 @@ defmodule PhoenixReplay.ReportController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{ChangesetErrors, Config, Hook, Scrub, Storage}
+  alias PhoenixReplay.{ChangesetErrors, Config, Hook, RateLimiter, Scrub, Storage}
   alias PhoenixReplay.Plug.Identify
 
-  @default_limits [max_report_bytes: 5_242_880]
+  @default_limits [max_report_bytes: 5_242_880, report_rate_per_minute: 10]
   @default_severity "medium"
 
   def create(conn, params) do
     identity = Identify.fetch(conn) || %{kind: :anonymous}
     limits = Keyword.merge(@default_limits, Config.limits())
 
-    with :ok <- check_body_size(conn, limits),
+    with :ok <- check_actor_rate(identity, limits),
+         :ok <- check_body_size(conn, limits),
          {:ok, description} <- fetch_description(params),
          {:ok, events} <- fetch_events(params),
          {:ok, session_id} <- Storage.Dispatch.start_session(identity, DateTime.utc_now()),
@@ -58,6 +59,11 @@ defmodule PhoenixReplay.ReportController do
           send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
       end
     else
+      {:error, :rate_limited, retry_after} ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(retry_after))
+        |> send_error(429, "rate_limited")
+
       {:error, :body_too_large} ->
         send_error(conn, 413, "body_too_large")
 
@@ -106,6 +112,16 @@ defmodule PhoenixReplay.ReportController do
   end
 
   defp stringify_keys(other), do: other
+
+  # Distinct key from EventsController's {:actor, _} bucket so Path A
+  # /report and Path B /events have independent quotas. A user actively
+  # reproducing a bug (Path B) shouldn't burn their /report budget on
+  # event flushes, and vice versa.
+  defp check_actor_rate(identity, limits) do
+    limit = Keyword.get(limits, :report_rate_per_minute, 10)
+    key = {:report, identity[:id] || identity[:kind] || :anonymous}
+    RateLimiter.hit(key, limit, 60)
+  end
 
   # Mirrors EventsController.check_body_size/2 — content-length-only
   # check (cheap, runs before body parsing). The key difference is the
