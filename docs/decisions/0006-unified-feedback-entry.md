@@ -1,7 +1,8 @@
 # ADR-0006: Unified Feedback Entry — Client-Side Ring Buffer + Two-Path UX
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-04-25
+**Accepted**: 2026-04-25
 **Builds on**: ADR-0001 (Widget Trigger UX), ADR-0002 (On-Demand Recording),
 ADR-0003 (Session Continuity), Mode-aware panel addons spec (2026-04-25)
 **Supersedes (in part)**: ADR-0002 — see Migration

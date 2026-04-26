@@ -1,8 +1,7 @@
 # Design: Unified Feedback Entry — UX, Capture Model, Addon Slots
 
 **Date**: 2026-04-25
-**Status**: Draft — brainstorm session 2026-04-25 (with `ash_feedback_demo`
-host) produced the decisions captured here.
+**Status**: Active — ADR-0006 Accepted 2026-04-25; Phase 1 plan to follow.
 **Owners**: phoenix_replay (primary), ash_feedback (consumer — see
 companion spec).
 **ADR**: [0006 — Unified Feedback Entry](../../decisions/0006-unified-feedback-entry.md)
