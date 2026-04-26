@@ -618,6 +618,8 @@
     // self-consistent if it's ever rendered without external wiring.
     let onStartClick = () => {};
     let onRetryClick = () => {};
+    let onChooseReportNowClick = () => {};
+    let onChooseRecordClick = () => {};
 
     function setScreen(name) {
       screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
@@ -633,6 +635,7 @@
       setScreen(SCREENS.ERROR);
       showModal();
     }
+    function openChoose() { setScreen(SCREENS.CHOOSE); showModal(); }
 
     // Mount panel addons against their slots. Each addon's mount(ctx)
     // returns optional { beforeSubmit, onPanelClose } hooks; we collect
@@ -703,6 +706,8 @@
     root.querySelector(".phx-replay-modal-backdrop").addEventListener("click", close);
     root.querySelector(".phx-replay-start-cta").addEventListener("click", () => onStartClick());
     root.querySelector(".phx-replay-retry").addEventListener("click", () => onRetryClick());
+    root.querySelector(".phx-replay-choose-report-now").addEventListener("click", () => onChooseReportNowClick());
+    root.querySelector(".phx-replay-choose-record").addEventListener("click", () => onChooseRecordClick());
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -747,9 +752,12 @@
       openForm,
       openStart,
       openError,
+      openChoose,
       close,
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
+      onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
+      onChooseRecord: (fn) => { onChooseRecordClick = fn; },
     };
   }
 
@@ -852,12 +860,17 @@
       const panel = renderPanel(cfg.mount, client, cfg);
       const mode = cfg.mode === "headless" ? "headless" : "float";
 
-      // Phase 2: intermediate shape. Task 4 rewrites this to branch
-      // on cfg.allowPaths (CHOOSE screen, or single-path skip). Until
-      // then keep the pre-Phase-2 always-form behavior so report_now-
-      // only hosts don't see a Record-and-report CTA.
+      // ADR-0006 Phase 2: route based on allow_paths.
+      //   both     → two-option CHOOSE screen
+      //   only A   → straight to Path A form (no panel-choice friction)
+      //   only B   → straight to Path B start (recording immediately)
       function routedOpen() {
-        panel.openForm();
+        const paths = cfg.allowPaths || ["report_now", "record_and_report"];
+        const aOnly = paths.length === 1 && paths[0] === "report_now";
+        const bOnly = paths.length === 1 && paths[0] === "record_and_report";
+        if (aOnly) return panel.openPathAForm();   // Task 5 wires the panel method
+        if (bOnly) return handleStartFromPanel();
+        panel.openChoose();
       }
 
       let toggle = null;
@@ -915,6 +928,8 @@
 
       panel.onStart(handleStartFromPanel);
       panel.onRetry(handleStartFromPanel);
+      panel.onChooseReportNow(() => panel.openPathAForm());
+      panel.onChooseRecord(() => handleStartFromPanel());
 
       instances.set(cfg.mount, {
         panel,
