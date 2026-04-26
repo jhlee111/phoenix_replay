@@ -1311,6 +1311,27 @@
         if (toggle && pill) recording ? toggle.hide() : toggle.show();
       }
 
+      // Async variant — awaits pill-action unmount so addons that flush
+      // state via async cleanup (e.g., audio recorder.onstop) settle into
+      // shared singletons before the next call site (handleStop →
+      // openReview) mounts review-media. Used only by handleStop; other
+      // callers (handleStart, handleReRecord) keep the sync variant
+      // because they don't transition into a slot that depends on
+      // pill-action's flushed state.
+      async function syncRecordingUIAwait() {
+        const recording = client.isRecording();
+        if (pill) {
+          if (recording) {
+            pill.show(client._internals.sessionStartedAtMs?.() ?? Date.now());
+            panel.mountSlot("pill-action", pill.slotEl);
+          } else {
+            await panel.unmountSlot("pill-action");
+            pill.hide();
+          }
+        }
+        if (toggle && pill) recording ? toggle.hide() : toggle.show();
+      }
+
       // Shared core: guard, await, sync UI. Callers layer their own
       // error-handling on top (panel shows an error screen; the global
       // API lets the rejection propagate).
@@ -1337,7 +1358,9 @@
         const wasRecording = client.isRecording();
         await client.stopRecording();
         if (!wasRecording) return;
-        syncRecordingUI();
+        // Use the async variant so pill-action addon cleanup (e.g.,
+        // audio recorder.onstop) finishes before review-media mounts.
+        await syncRecordingUIAwait();
         // Phase 3: Stop opens REVIEW (mini-player + addons). Continue
         // advances to the describe step (legacy FORM); Re-record
         // discards events and starts a fresh active session.
