@@ -1474,17 +1474,13 @@
       }
 
       async function handleReRecord() {
-        // Re-record from review = discard the just-captured events
-        // (already drained by takeReviewEvents in handleStop) and start
-        // a fresh active session. The pill swaps back in via
-        // syncRecordingUI; the panel closes so the pill is the only UI.
-        try {
-          await client.startRecording();
-          syncRecordingUI();
-          panel.close();
-        } catch (err) {
-          panel.openError(`Couldn't restart recording: ${err.message}`);
-        }
+        // ADR-0006 + 2026-04-26 audio redesign: Re-record returns the
+        // user to idle-start so any pre-flight options (voice toggle,
+        // etc.) can be reconsidered. The user clicks Start again to
+        // re-enter :active. The just-captured events were already
+        // drained by takeReviewEvents in handleStop, so no extra
+        // teardown is needed before reopening idle-start.
+        panel.openStart();
       }
 
       function handleContinue() {
