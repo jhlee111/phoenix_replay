@@ -461,9 +461,59 @@ fully removed and the `modes` → `paths` rename is in scope)
 | Q-E addon API | Add pill-action + review-media | D6 |
 | Q-F symbol fate | Drop `recording` attr; rename `modes` → `paths` (alpha license) | D1 (`:passive`/`:active` JS-internal), D6 (`paths` filter), D7 (`allow_paths`) |
 
+## Phase 1 follow-ups (deferred to Phase 2 or later)
+
+Captured 2026-04-25 from the Phase 1 implementation reviews. None
+were blockers for shipping Phase 1 as the foundation, but they need
+to be addressed before any host runs ADR-0006 in production.
+
+| ID | Item | Surface | Recommended phase |
+|---|---|---|---|
+| F1 | `inspect/1` of Ecto changeset / generic reason leaks into 422/500 response bodies (`report_controller.ex:55,65`; mirrored from `submit_controller.ex` pre-existing pattern) | Both `/report` and `/submit` controllers | Phase 2 — extract a shared `PhoenixReplay.ErrorView` / `Changeset.traverse_errors` serializer |
+| F2 | Orphan events when `submit/3` fails after `append_events/3` succeeds — events row exists with no parent feedback row. Symmetric to existing `SubmitController` risk; `/report` did not introduce it. | `report_controller.ex` + `submit_controller.ex` | Phase 2+ — wrap in single transaction at `Storage.Ecto` layer, or add a periodic GC sweep |
+| F3 | No body-size cap on `POST /report`. Phoenix's default `Plug.Parsers` 8 MB is the only backstop; `EventsController` adds an explicit `max_batch_bytes` (1 MB default). Worst-case Path A payload = 60s buffer + description + extras. | `report_controller.ex` | Phase 2 — add `Config.limits()`-driven `max_report_bytes` check matching `EventsController` style |
+| F4 | No rate limiting on `POST /report`. `EventsController` enforces per-actor + per-session limits via `RateLimiter`. Path A is single-shot per user click but a scripted attacker could DoS feedback storage. | `report_controller.ex` | Phase 2 — add `:actor` rate limit (e.g., 10 reports/minute) or document host-level throttling expectation |
+| F5 | Cosmetic: `flushOnUnload` `!sessionToken` check (line ~455) is dead code given the `state !== "active"` guard plus the active-state invariant. Either remove or comment as belt-and-suspenders. | `phoenix_replay.js` | Phase 2 cleanup |
+| F6 | Cosmetic: `cancelFlushTimer()` call in `stopRecording` is redundant since `transitionToPassive()` (called in other teardown paths) also cancels — but `stopRecording` no longer calls `transitionToPassive` to preserve the token, so the explicit cancel is currently load-bearing. Revisit when the partial/full teardown asymmetry is renamed. | `phoenix_replay.js` | Phase 2 cleanup |
+| F7 | JS lifecycle has no automated coverage. State-machine transitions, `flushOnUnload` `:passive` short-circuit, Path A end-to-end (client buffer → POST /report → submit row) all rely on manual smoke. Spec risk explicitly flagged the unload regression risk. | Project-wide | Separate ADR — JS test infrastructure (Vitest / Playwright). Carry the unload-gate test into that ADR's scope. |
+| F8 | Token-lifetime asymmetry: `stopRecording` does partial teardown (keeps token alive for follow-up `report()`), `transitionToPassive` does full teardown. The asymmetry is currently expressed via comments. Consider renaming the partial path (`pauseToPassive()` vs `transitionToPassive()`) so the difference is named, not commented. | `phoenix_replay.js` | Phase 2 |
+| F9 | Verify `/report` and `/submit` metadata merge order match (host-then-client vs client-then-host) so Path A and Path B produce semantically identical metadata. `/report` is currently `client_metadata |> stringify_keys() |> Map.merge(stringify_keys(host_metadata))` (host overrides client). | Both controllers | Phase 2 — one-line audit |
+| F10 | `Scrub.scrub_batch/1` robustness with non-map event entries. `EventsController` has the seq protocol to lean on; `/report` accepts arbitrary list contents (`{events: [1, 2, 3]}` would currently 201 with junk in storage). Worst case is a corrupt session row, not a crash. | `report_controller.ex` + `Scrub` | Phase 2 — verify or harden `Scrub` defensiveness |
+| F11 | `Hook.invoke(:metadata, conn)` returning a non-map would crash `stringify_keys/1`. Document the hook contract requires "map or nil" to prevent host bugs. | `Hook` documentation | Phase 2 docs |
+| F12 | `_testInternals` namespace exposed on `window.PhoenixReplay`. Disclaimer comment in place but a host could still type-check + use it. Consider build-flag gating or rename to `__phx_replay_test_internals__`. | `phoenix_replay.js` | Phase 2 cleanup |
+
+**Interim regression** (already in CHANGELOG): legacy `recording={:continuous}` widget Send button is broken until Phase 2 wires the new entry UX through `/report`. Detection is loud (HTTP 401, visible in DevTools). Affected widgets: `:continuous` only. Path B (`:on_demand` Stop → form → Send) continues to work because the session token is preserved across `stopRecording`.
+
 ## Addendum trigger
 
 If implementation surfaces facts that contradict the above (e.g.,
 ring buffer eviction has a perf problem at high event rates, or the
 two-option panel breaks an a11y assumption), append an addendum here
 rather than silently revising — same convention prior specs used.
+
+## Addendum 2026-04-25 — Phase 1 shipped
+
+Phase 1 shipped across 6 commits on `main` (`be25e73`..`596cfb9`) with
+full smoke matrix passing. Implementation followed the spec with two
+notable mid-flight adjustments:
+
+1. **`stopRecording` keeps the session token alive** (commit `a86c0d2`).
+   The original Task 3 implementation cleared the token on stop, which
+   broke the legacy Path B Stop → form → Send bridge (the panel form's
+   Send button calls `report()` which needs the token). Restored by
+   making `stopRecording` do partial teardown only — `cancelFlushTimer`,
+   `await flush()`, `state = "passive"`, `storageClear(RECORDING)` —
+   while leaving `sessionToken`/`sessionStartedAtMs`/`seq` and the
+   `STORAGE_KEYS.TOKEN` slot intact. `report()` clears the token after
+   the submit POST; `startRecording()` mints fresh anyway. The
+   asymmetry between `stopRecording`'s partial teardown and
+   `transitionToPassive()`'s full teardown is captured as F8 above.
+
+2. **`recording` field dropped, `state` is the single source of truth**
+   (commit `080b864`). The original Task 3 implementation kept both
+   `let recording = false` and `let state = "passive"` synchronized at
+   each transition site — a classic two-sources-of-truth setup that
+   would inevitably drift. `isRecording()` now derives from
+   `state === "active"`. Same commit also fixed `resetRecording` to
+   work in `:passive` (the original early-returned, leaving stale
+   ring-buffer events in place — public-API regression).
