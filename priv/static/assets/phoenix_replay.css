@@ -394,7 +394,11 @@
  */
 .phx-replay-review-player {
   width: 100%;
-  height: 16rem;
+  /* min-height (not fixed height) so rrweb-player's controller bar
+   * (rendered ~80px below the 16rem frame) is not clipped. The
+   * empty/loading state still gets the 16rem floor for its centered
+   * placeholder via the `:empty::before` rule below. */
+  min-height: 16rem;
   border: 1px solid var(--phx-replay-border);
   border-radius: 0.5rem;
   overflow: hidden;

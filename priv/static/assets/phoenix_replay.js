@@ -217,7 +217,7 @@
   function createRecorder({ buffer }) {
     if (!global.rrweb || !global.rrweb.record) {
       console.warn("[PhoenixReplay] rrweb not loaded; recording disabled. Metadata-only reports still work.");
-      return { stop: () => {} };
+      return { stop: () => {}, takeFullSnapshot: () => {} };
     }
 
     // rrweb@2.0 UMD plugins expose themselves under camel-cased package
@@ -242,7 +242,17 @@
       plugins,
     });
 
-    return { stop: typeof stop === "function" ? stop : () => {} };
+    return {
+      stop: typeof stop === "function" ? stop : () => {},
+      // Forces rrweb to emit a fresh Meta + FullSnapshot pair into the
+      // buffer. Used by `startRecording()` so the review-step mini-player
+      // has a base DOM to rebuild — without it, only IncrementalSnapshots
+      // flow into reviewEvents and the player iframe stays empty.
+      takeFullSnapshot: () => {
+        const fn = global.rrweb.record.takeFullSnapshot || global.rrweb.takeFullSnapshot;
+        if (typeof fn === "function") fn(true);
+      },
+    };
   }
 
   // ---- main controller ---------------------------------------------------
@@ -413,6 +423,12 @@
       await ensureSession();
       state = "active";
       storageWrite(STORAGE_KEYS.RECORDING, "active");
+      // rrweb runs continuously from page load; its initial Meta +
+      // FullSnapshot pair was emitted into the passive buffer and
+      // discarded by the drain above. Force a fresh pair now so Path B's
+      // review step has a base DOM to rebuild — and so the server stream
+      // for an :active session always begins with a snapshot.
+      recorder.takeFullSnapshot();
       scheduleFlush();
     }
 
@@ -849,9 +865,13 @@
     function openChoose() { setScreen(SCREENS.CHOOSE); showModal(); }
     function openPathAForm() { setScreen(SCREENS.PATH_A_FORM); showModal(); }
     function openReview(events) {
-      initMiniPlayer(events);
+      // Show the modal + REVIEW screen BEFORE constructing the player.
+      // rrweb-player bakes its scale from the `width` prop at construction
+      // time; reading `container.clientWidth` while the modal is still
+      // `display:none` returns 0 and freezes the player at zero width.
       setScreen(SCREENS.REVIEW);
       showModal();
+      initMiniPlayer(events);
     }
 
     // ADR-0006 Phase 3 slot lifecycle.
