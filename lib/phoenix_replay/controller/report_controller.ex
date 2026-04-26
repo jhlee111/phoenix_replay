@@ -17,7 +17,7 @@ defmodule PhoenixReplay.ReportController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{Hook, Scrub, Storage}
+  alias PhoenixReplay.{ChangesetErrors, Hook, Scrub, Storage}
   alias PhoenixReplay.Plug.Identify
 
   @default_severity "medium"
@@ -52,7 +52,7 @@ defmodule PhoenixReplay.ReportController do
           |> json(%{ok: true, id: fetch_id(feedback)})
 
         {:error, changeset} ->
-          send_error(conn, 422, "submit_failed", inspect(changeset))
+          send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
       end
     else
       {:error, :missing_description} ->
@@ -62,7 +62,7 @@ defmodule PhoenixReplay.ReportController do
         send_error(conn, 400, "events_must_be_list")
 
       {:error, reason} ->
-        send_error(conn, 500, "report_failed", inspect(reason))
+        send_error(conn, 500, "report_failed", ChangesetErrors.serialize(reason))
     end
   end
 

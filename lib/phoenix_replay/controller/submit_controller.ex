@@ -7,7 +7,7 @@ defmodule PhoenixReplay.SubmitController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{Hook, Session, SessionToken, Storage}
+  alias PhoenixReplay.{ChangesetErrors, Hook, Session, SessionToken, Storage}
   alias PhoenixReplay.Plug.Identify
 
   @token_header "x-phoenix-replay-session"
@@ -44,7 +44,7 @@ defmodule PhoenixReplay.SubmitController do
           |> json(%{ok: true, id: fetch_id(feedback)})
 
         {:error, changeset} ->
-          send_error(conn, 422, "submit_failed", inspect(changeset))
+          send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
       end
     else
       {:error, :missing_token} -> send_error(conn, 401, "missing_session_token")

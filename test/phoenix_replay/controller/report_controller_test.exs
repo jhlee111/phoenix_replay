@@ -109,5 +109,23 @@ defmodule PhoenixReplay.ReportControllerTest do
       assert conn.status == 400
       assert %{"error" => "events_must_be_list"} = json_response(conn, 400)
     end
+
+    test "422 detail is a serialized error map, not a stringified changeset", %{conn: conn} do
+      start_supervised!({PhoenixReplay.Test.FailingStorage, []})
+      Application.put_env(:phoenix_replay, :storage, {PhoenixReplay.Test.FailingStorage, []})
+
+      on_exit(fn ->
+        Application.put_env(:phoenix_replay, :storage, {PhoenixReplay.Test.RecordingStorage, []})
+      end)
+
+      conn = PhoenixReplay.ReportController.create(conn, %{"description" => "trigger 422"})
+
+      assert conn.status == 422
+      body = json_response(conn, 422)
+      assert body["error"] == "submit_failed"
+      # detail must be a structured map, never an inspect-string
+      assert is_map(body["detail"])
+      refute is_binary(body["detail"]) and String.contains?(body["detail"], "Ecto.Changeset")
+    end
   end
 end
