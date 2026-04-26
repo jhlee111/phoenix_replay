@@ -826,13 +826,12 @@
       const panel = renderPanel(cfg.mount, client, cfg);
       const mode = cfg.mode === "headless" ? "headless" : "float";
 
-      // `routedOpen` decides which screen the toggle / trigger / global
-      // `open()` should surface:
-      //   - on-demand + idle → Start CTA screen
-      //   - anything else    → report form (backward-compat)
+      // Phase 2: intermediate shape. Task 4 rewrites this to branch
+      // on cfg.allowPaths (CHOOSE screen, or single-path skip). Until
+      // then keep the pre-Phase-2 always-form behavior so report_now-
+      // only hosts don't see a Record-and-report CTA.
       function routedOpen() {
-        if (!client.isRecording()) panel.openStart();
-        else panel.openForm();
+        panel.openForm();
       }
 
       let toggle = null;
