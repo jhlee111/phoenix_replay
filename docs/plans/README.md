@@ -11,7 +11,7 @@ history. Newer plans live under `active/`, `backlog/`, `proposals/`,
 |---|-------|--------|------|
 | —  | Replay player timeline event bus (ADR-0005) | Phases 1 + 2 shipped; Phase 3 (docs) next | [active/2026-04-24-timeline-event-bus.md](active/2026-04-24-timeline-event-bus.md) |
 | —  | Mode-aware panel addons + Path A/B IA | Shipped 2026-04-25 — `registerPanelAddon({modes})`, Path B trigger renamed | [`docs/superpowers/specs/2026-04-25-mode-aware-panel-addons.md`](../superpowers/specs/2026-04-25-mode-aware-panel-addons.md) / [plan](../superpowers/plans/2026-04-25-mode-aware-panel-addons.md) |
-| —  | Unified Feedback Entry (ADR-0006) | Spec drafted 2026-04-25 — pending ADR Accept then implementation phases | [ADR](../decisions/0006-unified-feedback-entry.md) / [`docs/superpowers/specs/2026-04-25-unified-feedback-entry-design.md`](../superpowers/specs/2026-04-25-unified-feedback-entry-design.md) |
+| —  | Unified Feedback Entry (ADR-0006) | Phase 1 shipped 2026-04-25 (`be25e73..596cfb9`); Phase 2 plan ready | [ADR](../decisions/0006-unified-feedback-entry.md) / [spec](../superpowers/specs/2026-04-25-unified-feedback-entry-design.md) / [Phase 1](../superpowers/plans/2026-04-25-unified-entry-phase-1.md) / [Phase 2](../superpowers/plans/2026-04-25-unified-entry-phase-2.md) |
 | 6  | Hex publish | deferred | — |
 
 ## Proposals (drafted, not yet committed)
