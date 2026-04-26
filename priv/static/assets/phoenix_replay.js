@@ -57,7 +57,7 @@
     REVIEW: "review",             // Path B post-recording review (mini-player + Re-record + Continue)
   };
 
-  // Panel addon registry. Each entry: { id, slot, mount, modes }. `mount(ctx)`
+  // Panel addon registry. Each entry: { id, slot, mount, paths }. `mount(ctx)`
   // is invoked once per panel-mount; it returns optional { beforeSubmit,
   // onPanelClose } hooks. The orchestrator collects beforeSubmit return
   // values and merges all `extras` into the report() body.
@@ -67,7 +67,7 @@
   // end-to-end by the audio narration smoke flow in ash_feedback's Phase 2d
   // checklist. Add Vitest/JSDOM coverage when the recurring JS-test-infra
   // debt is paid (separate ADR).
-  const PANEL_ADDONS = new Map();  // id -> { id, slot, mount, modes }
+  const PANEL_ADDONS = new Map();  // id -> { id, slot, mount, paths }
 
   // ---- transport ---------------------------------------------------------
 
@@ -898,22 +898,17 @@
       };
     }
 
-    // ADR-0006 Phase 3 path filter. Canonical: addon declares
-    // `paths: ["report_now" | "record_and_report"]`. Legacy: `modes:
-    // ["on_demand" | "continuous"]` is shimmed for one more phase
-    // (audio addon migrates in the ash_feedback companion phase; this
-    // shim drops in Phase 4).
+    // ADR-0006 Phase 3+4 path filter. Addons declare
+    // `paths: ["report_now" | "record_and_report"]`; the filter
+    // mounts an addon when at least one declared path is in the
+    // host's `allow_paths`. Omitted `paths` means "mount on any
+    // path." The legacy `modes:` filter was removed in Phase 4 —
+    // see registerPanelAddon below for the rejection of stale
+    // registrations.
     function pathFilterMatches(addon) {
       const allow = cfg.allowPaths || ["report_now", "record_and_report"];
       if (Array.isArray(addon.paths) && addon.paths.length > 0) {
         return addon.paths.some((p) => allow.includes(p));
-      }
-      if (Array.isArray(addon.modes) && addon.modes.length > 0) {
-        return addon.modes.some((m) => {
-          if (m === "on_demand") return allow.includes("record_and_report");
-          if (m === "continuous") return allow.includes("report_now");
-          return false;
-        });
       }
       return true;
     }
@@ -1383,15 +1378,17 @@
       return client;
     },
 
-    // Open the first mounted panel. Routes per the widget's
-    // allow_paths: both → CHOOSE screen; report_now-only → Path A
-    // submit form directly; record_and_report-only → Path B start.
-    // Backwards-compat alias for openPanel(); the existing
-    // [data-phoenix-replay-trigger] delegated listener keeps working
-    // unchanged because it routes through inst.routedOpen().
+    // ADR-0006 Phase 4 (2026-04-26): the deprecated `open()` alias
+    // for `openPanel()` was removed. The throwing stub here points
+    // hosts at the canonical name with one error message rather than
+    // a vague "is not a function". The shim was retained for one
+    // phase (Phase 3 CHANGELOG announced the deprecation); any host
+    // still calling `.open()` after that window gets this message.
     open() {
-      const inst = firstInstance();
-      if (inst) inst.routedOpen();
+      throw new Error(
+        "[PhoenixReplay] window.PhoenixReplay.open() was removed in " +
+          "ADR-0006 Phase 4. Use window.PhoenixReplay.openPanel() instead."
+      );
     },
 
     // Canonical name for opening the panel — same routing as open().
@@ -1467,19 +1464,25 @@
       if (typeof mount !== "function") {
         throw new Error("[PhoenixReplay] registerPanelAddon requires a mount function");
       }
-      // `paths` (Phase 3) is the canonical filter — a list of
-      // user-facing path symbols (`"report_now"`, `"record_and_report"`).
-      // `modes` is the deprecated legacy filter from the 2026-04-25
-      // mode-aware addons spec; both flow through pathFilterMatches.
-      // New addons should use `paths`. The legacy `modes` shim drops
-      // in Phase 4 once the audio addon migrates.
+      // ADR-0006 Phase 4: `modes:` was removed. Accepting it silently
+      // would mount the addon on every path (the legacy gate is gone),
+      // which is a worse failure than a loud rejection. The throw
+      // names the canonical replacement so the migration is one line.
+      if (modes !== undefined) {
+        throw new Error(
+          "[PhoenixReplay] registerPanelAddon: the `modes:` filter was " +
+            "removed in ADR-0006 Phase 4. Use `paths: [\"report_now\" | " +
+            "\"record_and_report\"]` instead. Addon id: " + id
+        );
+      }
+      // `paths` is the canonical filter — a list of user-facing path
+      // symbols (`"report_now"`, `"record_and_report"`). Omitted means
+      // "mount on any path."
       const normalizedPaths = Array.isArray(paths) && paths.length > 0 ? paths : null;
-      const normalizedModes = Array.isArray(modes) && modes.length > 0 ? modes : null;
       PANEL_ADDONS.set(id, {
         id,
         slot: slot || "form-top",
         mount,
-        modes: normalizedModes,
         paths: normalizedPaths,
       });
     },
