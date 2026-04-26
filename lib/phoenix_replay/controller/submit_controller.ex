@@ -7,77 +7,60 @@ defmodule PhoenixReplay.SubmitController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{ChangesetErrors, Hook, Session, SessionToken, Storage}
+  import PhoenixReplay.Controller.Helpers, only: [fetch_id: 1, stringify_keys: 1]
+
+  alias PhoenixReplay.{ChangesetErrors, Hook, Session, Storage}
+  alias PhoenixReplay.Ingest.{Error, Pipeline}
   alias PhoenixReplay.Plug.Identify
 
-  @token_header "x-phoenix-replay-session"
-
   def create(conn, params) do
-    identity = Identify.fetch(conn)
+    ctx = %{
+      conn: conn,
+      params: params,
+      identity: Identify.fetch(conn)
+    }
 
-    with {:ok, token} <- fetch_token(conn),
-         {:ok, session_id} <- SessionToken.verify(token, identity) do
-      host_metadata = Hook.invoke(:metadata, conn) || %{}
-      client_metadata = Map.get(params, "metadata", %{})
+    with {:ok, ctx} <- Pipeline.fetch_token(ctx),
+         {:ok, ctx} <- Pipeline.verify_token(ctx),
+         {:ok, ctx} <- submit_feedback(ctx) do
+      # Best-effort close — if the Session process already exited
+      # (idle timeout, crash), the broadcast is skipped silently.
+      _ = Session.close(ctx.session_id, :submitted)
 
-      merged_metadata =
-        client_metadata
-        |> stringify_keys()
-        |> Map.merge(stringify_keys(host_metadata))
-
-      submit_params = %{
-        "description" => Map.get(params, "description"),
-        "severity" => Map.get(params, "severity"),
-        "metadata" => merged_metadata,
-        "jam_link" => Map.get(params, "jam_link"),
-        "extras" => stringify_keys(Map.get(params, "extras") || %{})
-      }
-
-      case Storage.Dispatch.submit(session_id, submit_params, identity) do
-        {:ok, feedback} ->
-          # Best-effort close — if the Session process already exited
-          # (idle timeout, crash), the broadcast is skipped silently.
-          _ = Session.close(session_id, :submitted)
-
-          conn
-          |> put_status(:created)
-          |> json(%{ok: true, id: fetch_id(feedback)})
-
-        {:error, changeset} ->
-          send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
-      end
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, id: fetch_id(ctx.feedback)})
     else
-      {:error, :missing_token} -> send_error(conn, 401, "missing_session_token")
-      {:error, :expired} -> send_error(conn, 410, "session_expired")
-      {:error, :invalid} -> send_error(conn, 401, "invalid_session_token")
-      {:error, :identity_mismatch} -> send_error(conn, 401, "identity_mismatch")
-      {:error, :no_secret} -> send_error(conn, 503, "not_configured")
+      {:error, %Error{} = err} -> Pipeline.respond(conn, err)
     end
   end
 
-  defp fetch_token(conn) do
-    case get_req_header(conn, @token_header) do
-      [token | _] when is_binary(token) and byte_size(token) > 0 -> {:ok, token}
-      _ -> {:error, :missing_token}
+  defp submit_feedback(ctx) do
+    %{conn: conn, params: params, identity: identity, session_id: session_id} = ctx
+
+    host_metadata = Hook.invoke(:metadata, conn) || %{}
+    client_metadata = Map.get(params, "metadata", %{})
+
+    merged_metadata =
+      client_metadata
+      |> stringify_keys()
+      |> Map.merge(stringify_keys(host_metadata))
+
+    submit_params = %{
+      "description" => Map.get(params, "description"),
+      "severity" => Map.get(params, "severity"),
+      "metadata" => merged_metadata,
+      "jam_link" => Map.get(params, "jam_link"),
+      "extras" => stringify_keys(Map.get(params, "extras") || %{})
+    }
+
+    case Storage.Dispatch.submit(session_id, submit_params, identity) do
+      {:ok, feedback} ->
+        {:ok, Map.put(ctx, :feedback, feedback)}
+
+      {:error, changeset} ->
+        {:error,
+         Error.new(422, "submit_failed", detail: ChangesetErrors.serialize(changeset))}
     end
-  end
-
-  defp fetch_id(%{id: id}), do: id
-  defp fetch_id(%{"id" => id}), do: id
-  defp fetch_id(_), do: nil
-
-  defp stringify_keys(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {to_string(k), v} end)
-  end
-
-  defp stringify_keys(other), do: other
-
-  defp send_error(conn, status, code, detail \\ nil) do
-    body = if detail, do: %{error: code, detail: detail}, else: %{error: code}
-
-    conn
-    |> put_status(status)
-    |> json(body)
-    |> halt()
   end
 end

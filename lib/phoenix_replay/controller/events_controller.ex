@@ -6,10 +6,9 @@ defmodule PhoenixReplay.EventsController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{Config, RateLimiter, Scrub, Session, SessionToken}
+  alias PhoenixReplay.{Config, Scrub, Session}
+  alias PhoenixReplay.Ingest.{Error, Pipeline}
   alias PhoenixReplay.Plug.Identify
-
-  @token_header "x-phoenix-replay-session"
 
   @default_limits [
     max_batch_bytes: 1_048_576,
@@ -18,90 +17,63 @@ defmodule PhoenixReplay.EventsController do
   ]
 
   def append(conn, params) do
-    identity = Identify.fetch(conn)
-    limits = Keyword.merge(@default_limits, Config.limits())
+    ctx = %{
+      conn: conn,
+      params: params,
+      identity: Identify.fetch(conn),
+      limits: Keyword.merge(@default_limits, Config.limits())
+    }
 
-    with :ok <- check_actor_rate(identity, limits),
-         {:ok, token} <- fetch_token(conn),
-         {:ok, session_id} <- SessionToken.verify(token, identity),
-         :ok <- check_session_rate(session_id, limits),
-         :ok <- check_body_size(conn, limits),
-         {:ok, seq, batch} <- parse_payload(params) do
-      scrubbed = Scrub.scrub_batch(batch)
-
-      with {:ok, _pid} <- Session.lookup_or_start(session_id, identity),
-           :ok <- Session.append_events(session_id, seq, scrubbed) do
-        json(conn, %{ok: true, seq: seq})
-      else
-        {:error, :conflict} -> send_error(conn, 409, "seq_conflict")
-        {:error, :no_session} -> send_error(conn, 410, "session_expired")
-        {:error, other} -> send_error(conn, 500, "append_failed", inspect(other))
-      end
+    with {:ok, ctx} <-
+           Pipeline.check_actor_rate(ctx,
+             bucket: :actor,
+             limit_key: :actor_rate_per_minute,
+             default: 300
+           ),
+         {:ok, ctx} <- Pipeline.fetch_token(ctx),
+         {:ok, ctx} <- Pipeline.verify_token(ctx),
+         {:ok, ctx} <-
+           Pipeline.check_session_rate(ctx,
+             limit_key: :batch_rate_per_minute,
+             default: 30
+           ),
+         {:ok, ctx} <-
+           Pipeline.check_body_size(ctx, limit_key: :max_batch_bytes, default: 1_048_576),
+         {:ok, ctx} <- parse_payload(ctx),
+         {:ok, ctx} <- lookup_or_start_session(ctx),
+         {:ok, ctx} <- append_events(ctx) do
+      json(conn, %{ok: true, seq: ctx.seq})
     else
-      {:error, :missing_token} -> send_error(conn, 401, "missing_session_token")
-      {:error, :expired} -> send_error(conn, 410, "session_expired")
-      {:error, :invalid} -> send_error(conn, 401, "invalid_session_token")
-      {:error, :identity_mismatch} -> send_error(conn, 401, "identity_mismatch")
-      {:error, :no_secret} -> send_error(conn, 503, "not_configured")
-      {:error, :body_too_large} -> send_error(conn, 413, "body_too_large")
-      {:error, :invalid_payload} -> send_error(conn, 400, "invalid_payload")
-      {:error, :rate_limited, retry_after} ->
-        conn
-        |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(retry_after))
-        |> send_error(429, "rate_limited")
+      {:error, %Error{} = err} -> Pipeline.respond(conn, err)
     end
   end
 
-  defp fetch_token(conn) do
-    case get_req_header(conn, @token_header) do
-      [token | _] when is_binary(token) and byte_size(token) > 0 -> {:ok, token}
-      _ -> {:error, :missing_token}
-    end
-  end
-
-  defp check_actor_rate(identity, limits) do
-    limit = Keyword.get(limits, :actor_rate_per_minute, 300)
-    key = {:actor, identity[:id] || identity[:kind] || :anonymous}
-    RateLimiter.hit(key, limit, 60)
-  end
-
-  defp check_session_rate(session_id, limits) do
-    limit = Keyword.get(limits, :batch_rate_per_minute, 30)
-    RateLimiter.hit({:session, session_id}, limit, 60)
-  end
-
-  defp check_body_size(conn, limits) do
-    max = Keyword.get(limits, :max_batch_bytes, 1_048_576)
-
-    case get_req_header(conn, "content-length") do
-      [value] ->
-        case Integer.parse(value) do
-          {n, _} when n <= max -> :ok
-          {_, _} -> {:error, :body_too_large}
-          :error -> :ok
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp parse_payload(params) do
+  defp parse_payload(%{params: params} = ctx) do
     case params do
       %{"seq" => seq, "events" => events} when is_integer(seq) and is_list(events) ->
-        {:ok, seq, events}
+        {:ok, ctx |> Map.put(:seq, seq) |> Map.put(:batch, events)}
 
       _ ->
-        {:error, :invalid_payload}
+        {:error, Error.new(400, "invalid_payload")}
     end
   end
 
-  defp send_error(conn, status, code, detail \\ nil) do
-    body = if detail, do: %{error: code, detail: detail}, else: %{error: code}
+  defp lookup_or_start_session(%{session_id: session_id, identity: identity} = ctx) do
+    case Session.lookup_or_start(session_id, identity) do
+      {:ok, _pid} -> {:ok, ctx}
+      {:error, :no_session} -> {:error, Error.new(410, "session_expired")}
+      {:error, other} -> {:error, Error.new(500, "append_failed", detail: inspect(other))}
+    end
+  end
 
-    conn
-    |> put_status(status)
-    |> json(body)
-    |> halt()
+  defp append_events(%{session_id: session_id, seq: seq, batch: batch} = ctx) do
+    scrubbed = Scrub.scrub_batch(batch)
+
+    case Session.append_events(session_id, seq, scrubbed) do
+      :ok -> {:ok, ctx}
+      {:error, :conflict} -> {:error, Error.new(409, "seq_conflict")}
+      {:error, :no_session} -> {:error, Error.new(410, "session_expired")}
+      {:error, other} -> {:error, Error.new(500, "append_failed", detail: inspect(other))}
+    end
   end
 end
