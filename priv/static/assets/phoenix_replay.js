@@ -735,7 +735,35 @@
     let onPathASubmitHandler = async (data) => { throw new Error("Path A submit handler not wired"); };
 
     function setScreen(name) {
-      screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
+      // Track which screens go from visible to hidden (slot-leaving)
+      // and which goes from hidden to visible (slot-entering) so
+      // screen-scoped addon slots get mount/unmount lifecycle hooks.
+      let entering = null;
+      const leaving = [];
+      screens.forEach((s) => {
+        const willHide = s.dataset.screen !== name;
+        const wasHidden = s.hasAttribute("hidden");
+        s.hidden = willHide;
+        if (!willHide && wasHidden) entering = s;
+        if (willHide && !wasHidden) leaving.push(s);
+      });
+
+      // Slot lifecycle: when a screen with a known slot becomes hidden,
+      // unmount its addons; when a screen with a known slot becomes
+      // visible, mount. form-top is panel-scoped (mounted at
+      // construction) and skipped here.
+      leaving.forEach((s) => {
+        const slotEl = s.querySelector("[data-slot]");
+        if (slotEl && slotEl.dataset.slot !== "form-top") {
+          unmountAddonsForSlot(slotEl.dataset.slot);
+        }
+      });
+      if (entering) {
+        const slotEl = entering.querySelector("[data-slot]");
+        if (slotEl && slotEl.dataset.slot !== "form-top") {
+          mountAddonsForSlot(slotEl.dataset.slot, slotEl);
+        }
+      }
     }
 
     function showModal() { modal.setAttribute("aria-hidden", "false"); }
@@ -811,56 +839,117 @@
       showModal();
     }
 
-    // Mount panel addons against their slots. Each addon's mount(ctx)
-    // returns optional { beforeSubmit, onPanelClose } hooks; we collect
-    // them for the submit orchestrator and the panel close cleanup.
-    const slotEls = new Map();  // slot name -> DOM element
-    root.querySelectorAll("[data-slot]").forEach((el) => {
-      slotEls.set(el.dataset.slot, el);
-    });
+    // ADR-0006 Phase 3 slot lifecycle.
+    //
+    // Each addon mounts when its slot's "host" DOM becomes live and
+    // unmounts when the host goes dead. Hosts:
+    //   - "form-top": panel-scoped (lives in the legacy + Path A forms,
+    //                 both rendered at panel construction). Mount once
+    //                 at construction; cleanup happens in close().
+    //   - "pill-action": Phase 3, hosted by the pill DOM. Lifecycle
+    //                    driven by the init orchestrator's syncRecordingUI
+    //                    via panel.mountSlot/unmountSlot.
+    //   - "review-media": Phase 3, hosted by REVIEW screen. Lifecycle
+    //                     driven by setScreen on screen transitions.
+    //
+    // Mount return shape:
+    //   - undefined → no cleanup (legacy form-top addons).
+    //   - function → called when slot goes dead (canonical new contract).
+    //   - object {beforeSubmit, onPanelClose} → legacy shape; collected
+    //     for the form-submit path and panel-close cleanup. Used by
+    //     Phase 2's audio addon (which returns this object today and
+    //     migrates in the ash_feedback companion phase).
 
-    const addonHooks = [];  // [{ id, beforeSubmit?, onPanelClose? }]
+    const addonHooks = [];   // [{ id, beforeSubmit?, onPanelClose? }]
     const addonCloseCbs = [];
 
-    // ADR-0006 Phase 2 transitional shim. The mode-aware addon spec
-    // (2026-04-25) registered audio addons with `modes: ["on_demand"]`.
-    // ADR-0006 dropped the recording attr; the new equivalent is
-    // "this addon mounts when allow_paths includes Path B
-    // (record_and_report)." Until Phase 4 renames `modes` to `paths`,
-    // this shim maps the legacy symbols:
-    //   "on_demand"  → mount when allowPaths includes record_and_report
-    //   "continuous" → mount when allowPaths includes report_now
-    function modeMatchesAllowPaths(modes) {
-      if (!modes) return true;
+    // Per-slot lifecycle state. Map<slotName, Map<addonId, cleanupFn|null>>.
+    // Tracks which addon ids are currently mounted on each slot, plus
+    // their cleanup function (if any) for unmount.
+    const slotState = new Map();
+
+    function ensureSlotState(slotName) {
+      if (!slotState.has(slotName)) slotState.set(slotName, new Map());
+      return slotState.get(slotName);
+    }
+
+    function buildAddonCtx(slotEl) {
+      return {
+        slotEl,
+        sessionId: () => client._internals?.sessionId?.() ?? null,
+        sessionStartedAtMs: () => client._internals?.sessionStartedAtMs?.() ?? null,
+        onPanelClose: (cb) => addonCloseCbs.push(cb),
+        reportError: (msg) => { errorMessage.textContent = msg; setScreen(SCREENS.ERROR); showModal(); },
+      };
+    }
+
+    // ADR-0006 Phase 3 path filter. Canonical: addon declares
+    // `paths: ["report_now" | "record_and_report"]`. Legacy: `modes:
+    // ["on_demand" | "continuous"]` is shimmed for one more phase
+    // (audio addon migrates in the ash_feedback companion phase; this
+    // shim drops in Phase 4).
+    function pathFilterMatches(addon) {
       const allow = cfg.allowPaths || ["report_now", "record_and_report"];
-      return modes.some((m) => {
-        if (m === "on_demand") return allow.includes("record_and_report");
-        if (m === "continuous") return allow.includes("report_now");
-        return false;
+      if (Array.isArray(addon.paths) && addon.paths.length > 0) {
+        return addon.paths.some((p) => allow.includes(p));
+      }
+      if (Array.isArray(addon.modes) && addon.modes.length > 0) {
+        return addon.modes.some((m) => {
+          if (m === "on_demand") return allow.includes("record_and_report");
+          if (m === "continuous") return allow.includes("report_now");
+          return false;
+        });
+      }
+      return true;
+    }
+
+    function mountAddonsForSlot(slotName, slotEl) {
+      if (!slotEl) return;
+      const state = ensureSlotState(slotName);
+      PANEL_ADDONS.forEach((addon) => {
+        if (addon.slot !== slotName) return;
+        if (state.has(addon.id)) return;  // already mounted
+        if (!pathFilterMatches(addon)) return;
+        try {
+          const ctx = buildAddonCtx(slotEl);
+          const result = addon.mount(ctx);
+          let cleanup = null;
+          if (typeof result === "function") {
+            // Canonical: result IS the cleanup function.
+            cleanup = result;
+          } else if (result && typeof result === "object") {
+            // Legacy: { beforeSubmit, onPanelClose } — collect for the
+            // orchestrator. cleanup stays null because panel-close cb
+            // handles release for legacy addons.
+            addonHooks.push({ id: addon.id, ...result });
+          }
+          state.set(addon.id, cleanup);
+        } catch (err) {
+          console.warn(`[PhoenixReplay] addon "${addon.id}" failed to mount on slot "${slotName}": ${err.message}`);
+        }
       });
     }
 
-    PANEL_ADDONS.forEach((addon) => {
-      if (!modeMatchesAllowPaths(addon.modes)) return;
+    function unmountAddonsForSlot(slotName) {
+      const state = slotState.get(slotName);
+      if (!state) return;
+      state.forEach((cleanup, id) => {
+        if (typeof cleanup === "function") {
+          try { cleanup(); } catch (err) {
+            console.warn(`[PhoenixReplay] addon "${id}" cleanup failed for slot "${slotName}": ${err.message}`);
+          }
+        }
+      });
+      state.clear();
+    }
 
-      const slotEl = slotEls.get(addon.slot);
-      if (!slotEl) {
-        console.warn(`[PhoenixReplay] addon "${addon.id}" requested unknown slot "${addon.slot}"`);
-        return;
-      }
-      try {
-        const ctx = {
-          slotEl,
-          sessionId: () => client._internals?.sessionId?.() ?? null,
-          sessionStartedAtMs: () => client._internals?.sessionStartedAtMs?.() ?? null,
-          onPanelClose: (cb) => addonCloseCbs.push(cb),
-          reportError: (msg) => { errorMessage.textContent = msg; setScreen(SCREENS.ERROR); showModal(); },
-        };
-        const hooks = addon.mount(ctx) || {};
-        addonHooks.push({ id: addon.id, ...hooks });
-      } catch (err) {
-        console.warn(`[PhoenixReplay] addon "${addon.id}" failed to mount: ${err.message}`);
-      }
+    // form-top is panel-scoped: mount once at construction. Each
+    // form-top slot element (legacy form + Path A form both have one)
+    // gets the same set of addons mounted against it — addons that
+    // care about form-context should keep state per-slotEl in their
+    // ctx closure.
+    root.querySelectorAll('[data-slot="form-top"]').forEach((slotEl) => {
+      mountAddonsForSlot("form-top", slotEl);
     });
 
     function close() {
@@ -872,6 +961,11 @@
       // always starts at the entry panel. The init orchestrator can
       // override via single-path skip when allow_paths has one entry.
       setScreen(SCREENS.FORM);
+      // Unmount any lifecycle-managed slots that were live. form-top
+      // legacy addons run their cleanup via addonCloseCbs (back-compat).
+      slotState.forEach((_state, slotName) => {
+        if (slotName !== "form-top") unmountAddonsForSlot(slotName);
+      });
       addonCloseCbs.forEach((cb) => {
         try { cb(); } catch (err) { console.warn(`[PhoenixReplay] addon close hook failed: ${err.message}`); }
       });
@@ -971,6 +1065,8 @@
       openPathAForm,
       openReview,
       close,
+      mountSlot: (slotName, slotEl) => mountAddonsForSlot(slotName, slotEl),
+      unmountSlot: (slotName) => unmountAddonsForSlot(slotName),
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
       onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
@@ -1147,7 +1243,9 @@
         if (pill) {
           if (recording) {
             pill.show(client._internals.sessionStartedAtMs?.() ?? Date.now());
+            panel.mountSlot("pill-action", pill.slotEl);
           } else {
+            panel.unmountSlot("pill-action");
             pill.hide();
           }
         }
@@ -1329,18 +1427,28 @@
       return inst ? inst.client.isRecording() : false;
     },
 
-    registerPanelAddon({ id, slot, mount, modes }) {
+    registerPanelAddon({ id, slot, mount, modes, paths }) {
       if (typeof id !== "string" || id.length === 0) {
         throw new Error("[PhoenixReplay] registerPanelAddon requires a string id");
       }
       if (typeof mount !== "function") {
         throw new Error("[PhoenixReplay] registerPanelAddon requires a mount function");
       }
-      // `modes` opt: array of recording-mode strings the addon mounts on.
-      // Omitted = mount on any mode (backwards-compat default for existing addons).
-      // Example: { id: "audio", modes: ["on_demand"] } — mounts only on on-demand widgets.
+      // `paths` (Phase 3) is the canonical filter — a list of
+      // user-facing path symbols (`"report_now"`, `"record_and_report"`).
+      // `modes` is the deprecated legacy filter from the 2026-04-25
+      // mode-aware addons spec; both flow through pathFilterMatches.
+      // New addons should use `paths`. The legacy `modes` shim drops
+      // in Phase 4 once the audio addon migrates.
+      const normalizedPaths = Array.isArray(paths) && paths.length > 0 ? paths : null;
       const normalizedModes = Array.isArray(modes) && modes.length > 0 ? modes : null;
-      PANEL_ADDONS.set(id, { id, slot: slot || "form-top", mount, modes: normalizedModes });
+      PANEL_ADDONS.set(id, {
+        id,
+        slot: slot || "form-top",
+        mount,
+        modes: normalizedModes,
+        paths: normalizedPaths,
+      });
     },
 
     // Auto-mount helper: finds elements with [data-phoenix-replay] and
