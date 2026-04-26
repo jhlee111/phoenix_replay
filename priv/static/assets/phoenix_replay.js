@@ -22,6 +22,7 @@
     maxEventsPerBatch: 50,
     flushIntervalMs: 5000,
     maxBufferedEvents: 10_000, // ring-buffer cap
+    bufferWindowMs: 60_000,    // ring-buffer time window (ADR-0006 Phase 1)
     // Network.
     tokenHeader: "x-phoenix-replay-session",
     csrfHeader: "x-csrf-token",
@@ -149,18 +150,43 @@
 
   // ---- ring buffer -------------------------------------------------------
 
-  function createRingBuffer(max) {
+  // Bounded buffer with two independent eviction policies, applied on push:
+  //   * count cap (`maxEvents`) — drops oldest when length exceeds the cap
+  //   * time window (`windowMs`) — drops head while head's timestamp is
+  //     older than `now - windowMs`
+  // Either or both may be active. `nowFn` is injectable for tests; defaults
+  // to `Date.now`. Each pushed event is wrapped as `{ event, ts }` internally
+  // and unwrapped on `drain()` so callers see the original event shape.
+  function createRingBuffer({ maxEvents, windowMs, nowFn } = {}) {
+    const now = typeof nowFn === "function" ? nowFn : () => Date.now();
+    const cap = typeof maxEvents === "number" && maxEvents > 0 ? maxEvents : null;
+    const window = typeof windowMs === "number" && windowMs > 0 ? windowMs : null;
     const arr = [];
+
+    function evictByTime() {
+      if (!window) return;
+      const cutoff = now() - window;
+      while (arr.length > 0 && arr[0].ts < cutoff) arr.shift();
+    }
+
+    function evictByCount() {
+      if (!cap) return;
+      if (arr.length > cap) arr.splice(0, arr.length - cap);
+    }
+
     return {
       push(evt) {
-        arr.push(evt);
-        if (arr.length > max) arr.splice(0, arr.length - max);
+        arr.push({ event: evt, ts: now() });
+        evictByTime();
+        evictByCount();
       },
       drain() {
-        const out = arr.splice(0, arr.length);
+        evictByTime();
+        const out = arr.splice(0, arr.length).map((entry) => entry.event);
         return out;
       },
       size() {
+        evictByTime();
         return arr.length;
       },
     };
@@ -210,7 +236,10 @@
     const { basePath, csrfToken } = cfg;
     if (!basePath) throw new Error("PhoenixReplay.init: basePath is required");
 
-    const buffer = createRingBuffer(cfg.maxBufferedEvents);
+    const buffer = createRingBuffer({
+      maxEvents: cfg.maxBufferedEvents,
+      windowMs: cfg.bufferWindowMs,
+    });
     let sessionToken = null;
     let sessionStartedAtMs = null;
     let seq = 0;
@@ -968,6 +997,10 @@
       });
     },
   };
+
+  // Internal factory exposed only for tests. Do not use from host code —
+  // the surface may change without a CHANGELOG entry.
+  PhoenixReplay._testInternals = { createRingBuffer };
 
   if (typeof global !== "undefined") global.PhoenixReplay = PhoenixReplay;
   if (typeof document !== "undefined") {
