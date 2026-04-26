@@ -102,6 +102,16 @@ defmodule PhoenixReplay.UI.Components do
         "window. Tune lower for memory-sensitive hosts; tune higher when " <>
         "users typically take longer to recognize and report a bug."
 
+  attr :audio_default, :atom,
+    default: :off,
+    values: [:on, :off],
+    doc:
+      "Initial state of an addon-supplied voice-commentary toggle on the " <>
+        "idle-start screen. Emitted as `data-audio-default` on the widget " <>
+        "root; addons read it during their idle-start-options mount. " <>
+        "`:off` (default) is privacy-friendly and avoids first-time " <>
+        "permission prompts. `:on` is suitable for QA-internal portals."
+
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
     doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
@@ -206,6 +216,7 @@ defmodule PhoenixReplay.UI.Components do
       data-show-severity={to_string(@show_severity)}
       data-allow-paths={Enum.map_join(@allow_paths, ",", &Atom.to_string/1)}
       data-buffer-window-seconds={@buffer_window_seconds}
+      data-audio-default={@audio_default}
       {@rest}
     />
     """

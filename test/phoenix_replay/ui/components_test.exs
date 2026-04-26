@@ -327,5 +327,26 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(src="/assets/my-player.js")
       assert html =~ ~s(href="/assets/my-player.css")
     end
+
+    test "audio_default defaults to off" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-audio-default="off")
+    end
+
+    test "audio_default={:on} flows to data-audio-default attr" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          audio_default: :on
+        )
+
+      assert html =~ ~s(data-audio-default="on")
+    end
   end
 end
