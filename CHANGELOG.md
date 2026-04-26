@@ -22,6 +22,54 @@ Smoke verified in Chrome on the ash_feedback_demo continuous + on-demand-float +
 on-demand-headless pages — see Phase 1.5 smoke matrix in
 `docs/superpowers/plans/2026-04-25-mode-aware-panel-addons.md`.
 
+### ADR-0006 Phase 1 — capture model + Path A ingest (2026-04-25)
+
+Recorder restructured around an internal `:passive` / `:active` state
+machine. In `:passive` (the new default at widget mount) rrweb continues
+to capture into a sliding ring buffer (default 60s window via the new
+`bufferWindowMs` option), but **no** `/session` or `/events` POST is
+issued. The 5-second flush timer never starts, and `flushOnUnload` is a
+no-op. The server is unaware of the user's page activity until they
+explicitly report.
+
+`:active` is reached via `startRecording()` and behaves as the old
+`:continuous` mode did: handshake `/session`, periodic `/events`
+flushes, finalize via `/submit`. `stopRecording()` returns to
+`:passive` while preserving the session token so a follow-up `report()`
+can still submit using the just-closed session. `report()` itself
+clears the token after the submit POST.
+
+`isRecording()` is now derived from the internal state, not a separate
+flag — single source of truth.
+
+New `POST /report` endpoint mounted by `feedback_routes/2` (alongside
+`/session` `/events` `/submit`) accepts the full Path A payload —
+`{description, severity, events, metadata, jam_link, extras}` — in a
+single request. The controller mints a synthetic session via
+`Storage.Dispatch.start_session/2`, persists events as one batch, and
+finalizes immediately. No long-lived `Session` GenServer is involved
+(Path A reports are one-shot, not in-flight sessions, so live admin
+session-watch correctly does not see them as in-flight).
+
+**Interim regression**: with autoMount no longer calling
+`client.start()`, a widget configured with the legacy
+`recording={:continuous}` host attr no longer auto-starts an active
+session. The widget panel's "Send" button (which routes through
+`report()`) succeeds only when the user has previously called
+`startRecording()` — i.e., the legacy `:continuous` "always-on"
+submit no longer works without an explicit start. The Path B
+"Record → Stop → form → Send" flow on `:on_demand` widgets continues
+to work because the session token is preserved across `stopRecording`.
+The new `/report` endpoint is the substrate for the Phase 2 entry UX
+which restores Path A submission for `:continuous` widgets.
+
+Internal: `_testInternals.createRingBuffer` exposed for the
+`node test/js/ring_buffer_test.js` smoke. `bufferWindowMs` joins
+`maxBufferedEvents` in `DEFAULTS`. The `transitionToPassive()` helper
+centralizes teardown for `resetRecording` and `report` (full token
+clear); `stopRecording` does a partial teardown (keeps token alive
+for follow-up submit).
+
 ### Added
 
 - Panel addon API: `window.PhoenixReplay.registerPanelAddon({ id, slot, mount })`
