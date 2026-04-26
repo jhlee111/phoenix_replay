@@ -153,40 +153,53 @@ migration cost reasons (per Mode-aware spec D1).
 
 ## Question F — what happens to the `:continuous` / `:on_demand` symbols?
 
-**Decision (proposed): keep both symbols, redefine semantics.**
+**Decision (proposed): drop the `recording` attr entirely; rename addon
+mode filter to path filter.**
 
-- `:on_demand` (renamed in user-facing prose to "Record and report") —
-  the only fresh-recording-with-server-flush mode. Same code symbol
-  as today.
-- `:continuous` — repurposed: client-side ring buffer always-on (the
-  new default). Same code symbol; capture mechanics changed.
+The library is alpha; symbol churn cost is acceptable. The
+unified-entry decision (Q-B) makes "which recording mode" no longer
+a host choice — the user picks per report. Keeping a `recording` attr
+that no longer drives behavior is a footgun.
 
-Hosts that explicitly set `recording: :continuous` get the new
-ring-buffer behavior automatically (they wanted "captures background
-activity for retroactive reports" — that's still the contract; only
-the implementation changed).
+Concrete changes:
 
-The default for the widget becomes `recording: :continuous` (ring
-buffer) regardless of `:headless` / `:float` mode. The two-option
-entry panel renders in both modes.
+- `attr :recording, :atom, values: [:continuous, :on_demand]` is
+  **removed** from `<.phoenix_replay_widget>`.
+- New attr `allow_paths` (D7 in spec) controls which user-paths the
+  panel offers. Default both.
+- Addon API filter renames `modes: ["on_demand"]` →
+  `paths: [:record_and_report]`. Symbol shift aligns the addon
+  surface with the user-facing path framing.
+- Internal recorder states are named `:passive` (ring buffer) and
+  `:active` (server-flushed session). These are JS-internal; no
+  external surface.
+- Mode-aware spec (2026-04-25, shipped) is partially superseded —
+  its `modes: ["on_demand"]` API is renamed to `paths:
+  [:record_and_report]` per this ADR. The shipped audio addon
+  registration is migrated as part of ADR-0006 Phase 3 (and the
+  ash_feedback companion spec).
 
-This is a **breaking semantic change** for hosts that relied on
-server-side accumulation of normal activity. Migration: hosts wanting
-that behavior wire their own client-side flush via the JS API
-(`PhoenixReplay.startRecording()` on page load forces server-flushed
-mode). README + CHANGELOG call this out.
+The control-style attr `mode: :float | :headless` is unchanged — it
+governs whether the widget renders its own toggle button vs. the host
+driving lifecycle programmatically. That's an orthogonal axis (per
+Mode-aware spec D3 addendum) and remains.
+
+Hosts that previously set `recording: :continuous` or `:on_demand`
+need to drop the attr — the compiler will flag the unknown attr
+clearly. CHANGELOG calls out the rename + attr removal as the
+migration item.
 
 ## Migration
 
-ADR-0002 is partially superseded:
+ADR-0002 is **superseded** (not partial):
 
-- The widget no longer needs a host-config recording-mode choice for
-  *user-facing path selection* — both paths are always available.
-- The `:on_demand` symbol survives as the implementation detail of
-  Path B's fresh-recording flow.
+- The `recording` attr is removed entirely. Both `:continuous` and
+  `:on_demand` symbols disappear from the public surface.
 - ADR-0002's "Start reproduction" UI flow is replaced by the
   two-option entry → recording pill → two-step submit flow described
   in the design spec.
+- Internal recorder lifecycle uses `:passive` / `:active` state
+  names; no host code references these.
 
 ADR-0003 (session continuity across page loads) survives unchanged
 for Path B (active server-flushed sessions). For Path A (ring buffer),
@@ -206,7 +219,7 @@ existing `form-top`, and the `modes` filter continues to gate mount.
 
 | Risk | Mitigation |
 |---|---|
-| Hosts relying on server-side continuous accumulation break silently | CHANGELOG + README migration note; the `:continuous` symbol stays so config doesn't break, only the runtime behavior changes |
+| Hosts relying on server-side continuous accumulation break silently | CHANGELOG + README migration note; the `recording` attr is removed (compiler flags unknown attr loudly — louder is better than silent semantic shift) |
 | Ring buffer cap (default 60s) is too small for some bug-report scenarios | Host-configurable via `data-buffer-window-seconds` attr; default chosen for typical "I just saw it" reporting |
 | Two-option panel is one extra click for the common "send what we have" case | Cards are equal-weight; muscle memory for "Report now" forms quickly. No A/B data yet — addendum if smoke shows otherwise |
 | Audio addon migration (form-top → pill-action + review-media) breaks ash_feedback Phase 2 surface | ash_feedback gets its own follow-up spec (referenced from this ADR's downstream section); migration is coordinated, not silent |
@@ -214,8 +227,6 @@ existing `form-top`, and the `modes` filter continues to gate mount.
 
 ## Out of scope
 
-- Renaming code symbols (`:continuous` → `:buffered`, etc.) — same
-  rationale as Mode-aware spec D1 (host migration cost > UX gain).
 - Server-side enforcement of buffer policy — the client is the source
   of truth for what gets uploaded; the server accepts what it receives.
 - Slimming the ring buffer below 60s default — out of scope here, can
@@ -230,11 +241,11 @@ existing `form-top`, and the `modes` filter continues to gate mount.
 | From | Decision | Carried into |
 |---|---|---|
 | ADR-0001 | Float vs headless control style | unchanged |
-| ADR-0002 | `:on_demand` symbol exists | Q-F: kept, semantics redefined |
+| ADR-0002 | `:on_demand` symbol exists | Q-F: removed (superseded) |
 | ADR-0003 | Session continuity across page loads | Q-A: applies to Path B only |
 | ADR-0004 | Live Session Watch | Q-A: unaffected (Path B sessions still flush) |
 | ADR-0005 | Replay player timeline event bus | unchanged |
-| Mode-aware spec (2026-04-25) | `registerPanelAddon({modes})` | Q-E: extended with new slots |
+| Mode-aware spec (2026-04-25) | `registerPanelAddon({modes})` | Q-E + Q-F: extended with new slots, `modes` renamed to `paths` |
 
 ## Downstream specs
 

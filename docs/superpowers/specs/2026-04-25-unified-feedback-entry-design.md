@@ -35,19 +35,23 @@ Key UX outcomes the implementation must produce:
 ### D1 — Capture model: client-side ring buffer
 
 phoenix_replay's `phoenix_replay.js` recorder is restructured into two
-states:
+internal states:
 
-- **Passive (default after widget mount)** — rrweb events accumulate in
-  a client-side ring buffer of `bufferWindowSeconds` (default 60).
+- **`:passive` (default after widget mount)** — rrweb events accumulate
+  in a client-side ring buffer of `bufferWindowSeconds` (default 60).
   Older events are evicted by time, not by count. The 5-second flush
   timer is **not started** in this state. No `/session` POST. No
   `/events` POST. Server is unaware the user is on the page.
 
-- **Active (after user clicks "Record and report" OR after Path A
+- **`:active` (after user clicks "Record and report" OR after Path A
   submit drains the buffer)** — current behavior: handshake `/session`,
   start the flush timer, POST `/events` every 5s, finalize via
-  `/submit`. After Active completes (submit or stop), the recorder
-  returns to Passive with a fresh empty buffer.
+  `/submit`. After `:active` completes (submit or stop), the recorder
+  returns to `:passive` with a fresh empty buffer.
+
+State names are JS-internal; no host code references them. The
+public surface is the user-facing path framing (Report now / Record
+and report).
 
 The ring buffer is implemented as a deque of `{event, timestamp}` pairs
 with eviction on every push (drop-head while head is older than
@@ -180,25 +184,31 @@ The data attribute `data-show-severity` propagates to the panel JS,
 which renders the severity field conditionally. Existing severity UI
 (buttons, CSS) is preserved.
 
-### D6 — New addon slots
+### D6 — New addon slots + filter rename `modes` → `paths`
 
-Extend the `registerPanelAddon` API documented in the Mode-aware spec:
+Extend the `registerPanelAddon` API documented in the Mode-aware spec.
+Per ADR-0006 Q-F the `modes` filter is renamed to `paths` and the
+allowed values shift to the user-facing path symbols:
 
 ```js
 window.PhoenixReplay.registerPanelAddon({
   id: "audio-mic",
   slot: "pill-action",
-  modes: ["on_demand"],  // Path B only
+  paths: [:record_and_report],  // Path B only (was modes:["on_demand"])
   mount: (ctx) => { /* inject mic toggle button */ },
 });
 
 window.PhoenixReplay.registerPanelAddon({
   id: "audio-playback",
   slot: "review-media",
-  modes: ["on_demand"],
+  paths: [:record_and_report],
   mount: (ctx) => { /* inject audio player bound to timeline bus */ },
 });
 ```
+
+Allowed `paths` values: `:report_now`, `:record_and_report`. Omitted
+means "any path" (default mount). The shipped `modes:["on_demand"]`
+audio addon registration migrates as part of Phase 3.
 
 Slots:
 
@@ -373,13 +383,16 @@ flush behavior is gone in Passive state. Path A submit endpoint added.
   slot disappears → unmount called); existing addon tests pass.
 - 3.6 CHANGELOG, README addon-API guide update, smoke.
 
-### Phase 4 — Migration notes + ADR-0002 supersede note
+### Phase 4 — Migration notes + ADR-0002 supersede note + symbol cleanup
 
 - 4.1 ADR-0002 amend addendum: pointer to ADR-0006 supersede.
-- 4.2 README migration section: "if you set `recording: :continuous`
-  expecting server-side accumulation, that behavior changed — see
-  ADR-0006".
-- 4.3 Demo pages updated (companion task in `ash_feedback_demo`).
+- 4.2 README migration section: `recording={:continuous | :on_demand}`
+  attr removed; `allow_paths` is the new knob; `modes:["on_demand"]`
+  addon filter renamed to `paths:[:record_and_report]`.
+- 4.3 CHANGELOG entry covering the attr removal + filter rename.
+- 4.4 Mode-aware spec (2026-04-25, shipped) gets an addendum noting
+  the partial supersede by ADR-0006.
+- 4.5 Demo pages updated (companion task in `ash_feedback_demo`).
 
 ## Test plan
 
@@ -419,6 +432,8 @@ flush behavior is gone in Passive state. Path A submit endpoint added.
 | Ring buffer cap (60s default) cuts off relevant context for slow bugs | Host-tunable via `buffer_window_seconds`; recommend Path B for any reproduction longer than the window |
 | Re-record in review state confuses users (does it discard the audio too?) | Confirmation copy: "Re-record will discard this attempt"; existing addon `unmount` callback is the audio addon's signal to release the blob |
 | Addon authors with `slot: "form-top"` + audio-like assumptions break | The audio addon migration is in the companion spec; addon API doc clarifies which slot is appropriate for which mount-time |
+| `modes` → `paths` rename breaks any out-of-tree addon registrations | Library is alpha — only consumer is ash_feedback's audio addon, migrated in companion spec; CHANGELOG documents the rename |
+| Hosts pass the removed `recording={...}` attr | Phoenix component compiler raises on unknown attrs — fails loudly, not silently |
 | `show_severity: false` default surprises hosts who relied on severity always being present | CHANGELOG entry; the field still exists on the resource and admin can backfill |
 | Path B-only hosts (`allow_paths: [:record_and_report]`) lose the fast-text-only escape hatch | Documented as the deliberate trade-off; hosts that want both should leave the default |
 
@@ -429,8 +444,8 @@ flush behavior is gone in Passive state. Path A submit endpoint added.
 - AdminLive UI changes — admin replay still works against submitted
   events.
 - Compression / sampling of the ring buffer — separate ADR if needed.
-- Migrating the `:continuous` symbol name — symbol stays per ADR-0006
-  Q-F.
+(no remaining out-of-scope item from Q-F — the `recording` attr is
+fully removed and the `modes` → `paths` rename is in scope)
 - Multi-page Path A reproduction (page navigation discards the ring
   buffer; users wanting multi-page pick Path B).
 - gs_net host migration — gs_net is a private workplace repo (memory
@@ -445,7 +460,7 @@ flush behavior is gone in Passive state. Path A submit endpoint added.
 | Q-C mic timing | In-flight pill toggle | D6 (pill-action slot for ash_feedback) |
 | Q-D severity | Default OFF, host opt-in | D5 |
 | Q-E addon API | Add pill-action + review-media | D6 |
-| Q-F symbol fate | Keep `:continuous` / `:on_demand`, redefine | D1 (recorder state names align internally) |
+| Q-F symbol fate | Drop `recording` attr; rename `modes` → `paths` (alpha license) | D1 (`:passive`/`:active` JS-internal), D6 (`paths` filter), D7 (`allow_paths`) |
 
 ## Addendum trigger
 
