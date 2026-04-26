@@ -8,6 +8,12 @@ defmodule PhoenixReplay.ReportController do
   # mints a synthetic session, persists the events as a single batch
   # (seq=0), and finalizes via submit/3 — all without the long-lived
   # Session GenServer machinery used by the multi-batch :active flow.
+  #
+  # Intentionally does NOT call Session.start_session — Path A reports
+  # are one-shot, not in-flight sessions, so they don't broadcast on
+  # the :session_started / :session_closed PubSub topics. Live admin
+  # session-watch will not see Path A reports as in-flight sessions
+  # (correct: there is no in-flight to watch).
 
   use Phoenix.Controller, formats: [:json]
 
@@ -20,7 +26,7 @@ defmodule PhoenixReplay.ReportController do
     identity = Identify.fetch(conn) || %{kind: :anonymous}
 
     with {:ok, description} <- fetch_description(params),
-         events when is_list(events) <- Map.get(params, "events", []),
+         {:ok, events} <- fetch_events(params),
          {:ok, session_id} <- Storage.Dispatch.start_session(identity, DateTime.utc_now()),
          :ok <- maybe_append(session_id, events) do
       host_metadata = Hook.invoke(:metadata, conn) || %{}
@@ -67,21 +73,23 @@ defmodule PhoenixReplay.ReportController do
     end
   end
 
+  defp fetch_events(params) do
+    case Map.get(params, "events", []) do
+      list when is_list(list) -> {:ok, list}
+      _ -> {:error, :events_not_list}
+    end
+  end
+
   # Empty events list is valid — text-only Report Now is supported.
   # Non-empty list is scrubbed and persisted as a single batch.
+  # Storage.@callback append_events/3 declares :ok | {:error, term()};
+  # we honor that contract exactly (no {:ok, _} fallback).
   defp maybe_append(_session_id, []), do: :ok
 
   defp maybe_append(session_id, events) when is_list(events) do
     scrubbed = Scrub.scrub_batch(events)
-
-    case Storage.Dispatch.append_events(session_id, 0, scrubbed) do
-      :ok -> :ok
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
-    end
+    Storage.Dispatch.append_events(session_id, 0, scrubbed)
   end
-
-  defp maybe_append(_session_id, _other), do: {:error, :events_not_list}
 
   defp fetch_id(%{id: id}), do: id
   defp fetch_id(%{"id" => id}), do: id

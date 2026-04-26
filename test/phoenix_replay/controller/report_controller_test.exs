@@ -100,5 +100,14 @@ defmodule PhoenixReplay.ReportControllerTest do
       assert submit_params["extras"]["audio_url"] == "s3://bucket/clip"
       assert submit_params["jam_link"] == "https://jam.dev/c/abc"
     end
+
+    test "non-list events → 400", %{conn: conn} do
+      params = %{"description" => "bad events", "events" => "not a list"}
+
+      conn = PhoenixReplay.ReportController.create(conn, params)
+
+      assert conn.status == 400
+      assert %{"error" => "events_must_be_list"} = json_response(conn, 400)
+    end
   end
 end
