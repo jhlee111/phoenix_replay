@@ -45,7 +45,7 @@ Use semantic markup (`<button>` for actions) when appropriate:
 
 For power-user or internal-tool scenarios, a global shortcut is often
 the right trigger. Bind from your own JS (or a LiveView `handleEvent`)
-and call `window.PhoenixReplay.open()`.
+and call `window.PhoenixReplay.openPanel()`.
 
 ```js
 // app.js
@@ -53,7 +53,7 @@ document.addEventListener("keydown", (e) => {
   const mod = navigator.platform.startsWith("Mac") ? e.metaKey : e.ctrlKey;
   if (mod && e.shiftKey && e.key.toLowerCase() === "f") {
     e.preventDefault();
-    window.PhoenixReplay.open();
+    window.PhoenixReplay.openPanel();
   }
 });
 ```
@@ -79,7 +79,7 @@ to remember to click.
 
 For programmatic control — e.g., pre-fill the description from the
 error context — read the error from your app state, call
-`PhoenixReplay.open()`, and populate the textarea manually:
+`PhoenixReplay.openPanel()`, and populate the textarea manually:
 
 ```js
 function reportError(summary) {
@@ -87,7 +87,7 @@ function reportError(summary) {
     ".phx-replay-modal-panel textarea[name=description]"
   );
   if (textarea) textarea.value = `Context: ${summary}\n\n`;
-  window.PhoenixReplay.open();
+  window.PhoenixReplay.openPanel();
 }
 ```
 
@@ -129,7 +129,7 @@ reason.
 
 ## 5. One-widget-per-page assumption
 
-`window.PhoenixReplay.open()` / `close()` act on the first mounted
+`window.PhoenixReplay.openPanel()` / `close()` act on the first mounted
 widget. Mounting multiple widgets emits a console warning and the
 global API operates on whichever one initialized first. If you have a
 legitimate multi-widget scenario (e.g., an admin preview pane that

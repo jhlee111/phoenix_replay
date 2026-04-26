@@ -114,7 +114,7 @@ Two integration shapes:
 
 ### 1. Library-rendered Start CTA
 
-Call `window.PhoenixReplay.open()` from anywhere — a menu item, a
+Call `window.PhoenixReplay.openPanel()` from anywhere — a menu item, a
 keyboard shortcut, a trigger element. While recording is idle, the
 panel opens on the Start screen; once recording has started, the
 same `open()` call routes to the submit form.

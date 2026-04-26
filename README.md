@@ -284,7 +284,7 @@ modals that prompt a bug report, etc. — call the global API from your
 JS:
 
 ```js
-window.PhoenixReplay.open();
+window.PhoenixReplay.openPanel();
 window.PhoenixReplay.close();
 ```
 
@@ -505,33 +505,36 @@ window.PhoenixReplay.registerPanelAddon({
 - `mount` (required, function) — called once per panel mount with the context
   object documented above. Returns optional `beforeSubmit` / `onPanelClose`
   callbacks.
-- `modes` (optional, array of strings) — recording-mode strings the addon
-  mounts on (e.g., `["on_demand"]`). When present, the addon is skipped for
-  widgets whose `recording` value isn't in the list. Default (omitted): mount
-  on any recording mode. Filter operates on recording mode only; control style
-  (`:float` / `:headless`) is independent.
+- `paths` (optional, array of strings) — user-facing path symbols the addon
+  mounts on (`"report_now"` and/or `"record_and_report"`). When present, the
+  addon is skipped for widgets whose `allow_paths` excludes every listed
+  path. Default (omitted): mount on either path. The legacy `modes:` filter
+  was removed in ADR-0006 Phase 4.
 
-  Example — an addon that's only meaningful on on-demand recordings:
+  Example — an addon that's only meaningful on Path B (Record-and-report):
 
   ```javascript
   PhoenixReplay.registerPanelAddon({
     id: "audio",
-    modes: ["on_demand"],
+    paths: ["record_and_report"],
     mount: (ctx) => { /* ... */ },
   });
   ```
 
-### Recording modes — symbol ↔ user-facing name
+### User paths — symbol ↔ user-facing name
 
 | Symbol | User-facing name | When to use |
 |---|---|---|
-| `:continuous` | Quick report mode | Cached event buffer; user reports after the fact (Path A — no audio commentary, replay timeline predates any voice note by minutes) |
-| `:on_demand` | Record-and-report mode | Recording starts on user click; supports voice commentary (Path B — rrweb + audio start at the same moment, sync is meaningful) |
+| `"report_now"` | Quick report | The user clicks Report Now in the entry panel. The buffered ring of the last `buffer_window_seconds` is uploaded with the description. Text-only — no audio commentary because the buffer predates any voice note. |
+| `"record_and_report"` | Record and report | The user clicks Record-and-report in the entry panel. A fresh server-flushed session begins; addons targeting `pill-action` (e.g. ash_feedback's mic toggle) mount on the recording pill. Audio commentary is supported here because rrweb + voice start together. |
 
-(`:headless` is a control style — `:float` vs `:headless` — not a recording mode.
-It composes with either of the above. The addon `modes` filter operates on
-recording mode only, so a `:headless` + `:on_demand` widget mounts on-demand
-addons normally.)
+The `paths:` filter on `registerPanelAddon` selects which user paths an
+addon mounts on. The control-style attr `mode: :float | :headless` is
+orthogonal — it governs whether the widget renders its own toggle button
+or whether the host wires a `[data-phoenix-replay-trigger]` element / calls
+`window.PhoenixReplay.openPanel()` directly. A `:headless` widget that
+allows both paths still mounts a `paths: ["record_and_report"]` addon on
+Path B.
 
 The Storage adapter sees the merged extras under `submit_params["extras"]`:
 

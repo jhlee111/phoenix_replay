@@ -73,7 +73,7 @@ defmodule PhoenixReplay.UI.Components do
       "`:float` renders the floating toggle button (default). `:headless` " <>
         "renders only the panel; host wires its own trigger via " <>
         "`[data-phoenix-replay-trigger]` on any element or by calling " <>
-        "`window.PhoenixReplay.open()` / `.close()`."
+        "`window.PhoenixReplay.openPanel()` / `.close()`."
 
   attr :show_severity, :boolean,
     default: false,
@@ -180,7 +180,7 @@ defmodule PhoenixReplay.UI.Components do
   Any element with `[data-phoenix-replay-trigger]` opens the panel when
   clicked (including elements added to the DOM after page load — the
   click listener is delegated at the document level). For programmatic
-  control, call `window.PhoenixReplay.open()` and
+  control, call `window.PhoenixReplay.openPanel()` and
   `window.PhoenixReplay.close()` from your JS. See the
   [Headless integration guide](guides/headless-integration.html) for
   worked examples.

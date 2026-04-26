@@ -1367,7 +1367,7 @@
       if (instances.size > 1) {
         console.warn(
           "[PhoenixReplay] multiple widget instances detected; " +
-            "window.PhoenixReplay.open()/close() will act on the first."
+            "window.PhoenixReplay.openPanel()/close() will act on the first."
         );
       }
       installTriggerListener();
