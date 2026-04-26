@@ -48,7 +48,13 @@
 
   // Panel screens. Kept as named constants so typos become
   // ReferenceErrors rather than silent "nothing shows" bugs.
-  const SCREENS = { IDLE_START: "idle_start", ERROR: "error", FORM: "form" };
+  const SCREENS = {
+    CHOOSE: "choose",
+    IDLE_START: "idle_start",
+    ERROR: "error",
+    FORM: "form",                  // Path B describe step (legacy name preserved)
+    PATH_A_FORM: "path_a_form",    // Path A single-step submit (markup added in Task 5)
+  };
 
   // Panel addon registry. Each entry: { id, slot, mount, modes }. `mount(ctx)`
   // is invoked once per panel-mount; it returns optional { beforeSubmit,
@@ -533,6 +539,26 @@
       <div class="phx-replay-modal" role="dialog" aria-hidden="true" aria-labelledby="phx-replay-title">
         <div class="phx-replay-modal-backdrop"></div>
         <div class="phx-replay-modal-panel">
+          <section class="phx-replay-screen phx-replay-screen--choose" data-screen="${SCREENS.CHOOSE}" hidden>
+            <h2>Report an issue</h2>
+            <p class="phx-replay-screen-lede">How would you like to send feedback?</p>
+            <div class="phx-replay-choose-cards">
+              <button type="button" class="phx-replay-choose-card phx-replay-choose-report-now" data-path="report_now">
+                <span class="phx-replay-choose-card-icon" aria-hidden="true">📨</span>
+                <span class="phx-replay-choose-card-title">Report now</span>
+                <span class="phx-replay-choose-card-desc">Includes the recent activity from this page.</span>
+              </button>
+              <button type="button" class="phx-replay-choose-card phx-replay-choose-record" data-path="record_and_report">
+                <span class="phx-replay-choose-card-icon" aria-hidden="true">🔴</span>
+                <span class="phx-replay-choose-card-title">Record and report</span>
+                <span class="phx-replay-choose-card-desc">Start a fresh recording, then describe the issue.</span>
+              </button>
+            </div>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+            </div>
+          </section>
+
           <section class="phx-replay-screen phx-replay-screen--idle-start" data-screen="${SCREENS.IDLE_START}" hidden>
             <h2>Record and report</h2>
             <p class="phx-replay-screen-lede">
