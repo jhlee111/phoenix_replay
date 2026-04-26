@@ -930,14 +930,46 @@
     pill.hidden = true;
     pill.innerHTML = `
       <span class="phx-replay-pill-dot" aria-hidden="true"></span>
-      <span class="phx-replay-pill-label">Recording…</span>
+      <span class="phx-replay-pill-label">Recording</span>
+      <span class="phx-replay-pill-time" aria-live="off">0:00</span>
+      <div class="phx-replay-pill-action-slot" data-slot="pill-action"></div>
       <button type="button" class="phx-replay-pill-stop">Stop</button>
     `;
     widgetRoot.appendChild(pill);
     pill.querySelector(".phx-replay-pill-stop").addEventListener("click", onStop);
+
+    let tickHandle = null;
+    let startedAtMs = null;
+    const timeEl = pill.querySelector(".phx-replay-pill-time");
+
+    function tick() {
+      if (!startedAtMs) return;
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      const m = Math.floor(elapsed / 60);
+      const s = elapsed % 60;
+      timeEl.textContent = `${m}:${s.toString().padStart(2, "0")}`;
+    }
+
     return {
-      show: () => { pill.hidden = false; },
-      hide: () => { pill.hidden = true; },
+      show: (atMs) => {
+        pill.hidden = false;
+        startedAtMs = atMs || Date.now();
+        tick();
+        if (tickHandle) clearInterval(tickHandle);
+        tickHandle = setInterval(tick, 1000);
+      },
+      hide: () => {
+        pill.hidden = true;
+        if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
+        startedAtMs = null;
+        timeEl.textContent = "0:00";
+      },
+      // Slot DOM exposed so the orchestrator (Task 5) can mount/unmount
+      // addons tied to the pill's lifecycle.
+      slotEl: pill.querySelector(".phx-replay-pill-action-slot"),
+      // Read-only: when the active session started. Used by addons that
+      // need a stable reference (e.g., audio_start_offset_ms calc).
+      startedAtMs: () => startedAtMs,
     };
   }
 
@@ -1031,7 +1063,13 @@
       // shows and the toggle hides, swapping them back when `:passive`.
       function syncRecordingUI() {
         const recording = client.isRecording();
-        if (pill) recording ? pill.show() : pill.hide();
+        if (pill) {
+          if (recording) {
+            pill.show(client._internals.sessionStartedAtMs?.() ?? Date.now());
+          } else {
+            pill.hide();
+          }
+        }
         if (toggle && pill) recording ? toggle.hide() : toggle.show();
       }
 

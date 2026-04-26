@@ -362,3 +362,27 @@
 .phx-replay-path-a-banner-icon {
   flex: 0 0 auto;
 }
+
+/* Pill recording-time display + addon action slot. The slot is a
+ * thin horizontal container between the time display and the Stop
+ * button; addons mount their controls (e.g., audio mic toggle) here.
+ */
+.phx-replay-pill-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: var(--phx-replay-text-muted);
+  min-width: 2.5rem;
+}
+
+.phx-replay-pill-action-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  /* Pill grows horizontally as needed; no fixed width.
+   * Empty slot is invisible (no padding/border) so the pill keeps
+   * its compact size when no addon mounts. */
+}
+
+.phx-replay-pill-action-slot:empty {
+  display: none;
+}
