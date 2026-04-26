@@ -92,12 +92,7 @@ defmodule PhoenixReplay.SubmitControllerTest do
         %{"page" => "host-wins", "host_only" => "x"}
       end)
 
-      on_exit(fn ->
-        case prior_metadata do
-          nil -> Application.delete_env(:phoenix_replay, :metadata)
-          v -> Application.put_env(:phoenix_replay, :metadata, v)
-        end
-      end)
+      on_exit(fn -> restore(:metadata, prior_metadata) end)
 
       params = %{
         "description" => "merge order",
