@@ -201,6 +201,41 @@
   min-height: 1.25rem;
 }
 
+/* Idle-start options slot — host/addon-supplied controls (e.g. voice
+ * commentary toggle) rendered above the action buttons. The slot
+ * has no padding/border of its own; addons style their own internals. */
+.phx-replay-screen-options {
+  margin-top: 0.75rem;
+}
+
+.phx-replay-screen-options:empty {
+  display: none;
+}
+
+/* Inline error region — paired with [data-slot-error] markup. Surfaces
+ * canStart hook failures directly under the options slot so the user
+ * sees the cause without leaving idle-start. */
+.phx-replay-inline-error {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.35rem;
+  background: var(--phx-replay-error-surface, #fef2f2);
+  border-left: 3px solid var(--phx-replay-error-border, #f87171);
+  color: var(--phx-replay-error-text, #991b1b);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.phx-replay-inline-error[hidden] {
+  display: none;
+}
+
+/* Disabled Start CTA — visually communicates that pre-flight failed. */
+.phx-replay-start-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Recording pill: :float + :on_demand indicator that replaces the toggle
  * during an active reproduction. Position + sizing mirror the toggle but
  * live under an independent `--phx-replay-pill-*` CSS var family so hosts
