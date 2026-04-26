@@ -267,6 +267,15 @@
     //   :passive -> :active   on startRecording()
     //   :active  -> :passive  on stopRecording() / report() teardown
     let state = "passive";
+    // Accumulator for events seen during the current :active session.
+    // Path B's review step (Phase 3) feeds these to a mini rrweb-player
+    // so the user can preview the recording before Send. Cleared on
+    // session start (transition into :active) and on transitionToPassive
+    // teardown. stopRecording does NOT clear — Stop intentionally keeps
+    // the accumulator alive for the review step that opens immediately
+    // after. Memory bound: a typical Path B session (30s-2min) is
+    // ~100KB-1MB.
+    let reviewEvents = [];
 
     // Begin rrweb capture immediately into the ring buffer. The buffer
     // is bounded by time + count, so this is safe to leave running for
@@ -336,6 +345,11 @@
             tokenHeader: cfg.tokenHeader,
           });
           seq += 1;
+          // Mirror to review accumulator only on flush success — failed
+          // batches are dropped from the local accumulator the same way
+          // they're dropped from the server stream (the next flush will
+          // re-attempt with fresh events).
+          for (const evt of batch) reviewEvents.push(evt);
         } catch (err) {
           if (err instanceof PhoenixReplayError && (err.status === 410 || err.status === 401)) {
             // Session expired / unauthorized → mint a fresh token; drop these events.
@@ -378,6 +392,7 @@
       sessionToken = null;
       sessionStartedAtMs = null;
       seq = 0;
+      reviewEvents = [];
       storageClear(STORAGE_KEYS.TOKEN);
       storageClear(STORAGE_KEYS.RECORDING);
     }
@@ -393,6 +408,7 @@
       // Drop any buffered passive-state events — the user wants a
       // clean reproduction starting now (ADR-0006 D1).
       buffer.drain();
+      reviewEvents = [];
       await ensureSession();
       state = "active";
       storageWrite(STORAGE_KEYS.RECORDING, "active");
@@ -537,6 +553,17 @@
       }
     }
 
+    // Path B review step (Phase 3). Returns the events captured during
+    // the just-stopped :active session and clears the internal
+    // accumulator. Called once when the review screen opens; subsequent
+    // calls return [] until a new active session starts. Re-record
+    // (via startRecording) clears + restarts.
+    function takeReviewEvents() {
+      const out = reviewEvents.slice();
+      reviewEvents = [];
+      return out;
+    }
+
     return {
       start,
       report,
@@ -547,6 +574,7 @@
       stopRecording,
       resetRecording,
       isRecording,
+      takeReviewEvents,
       _internals: {
         buffer,
         // No client-side session id is tracked (only the opaque token);
