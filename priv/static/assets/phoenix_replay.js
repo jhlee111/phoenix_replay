@@ -976,10 +976,16 @@
       // always starts at the entry panel. The init orchestrator can
       // override via single-path skip when allow_paths has one entry.
       setScreen(SCREENS.FORM);
-      // Unmount any lifecycle-managed slots that were live. form-top
-      // legacy addons run their cleanup via addonCloseCbs (back-compat).
-      slotState.forEach((_state, slotName) => {
-        if (slotName !== "form-top") unmountAddonsForSlot(slotName);
+      // Unmount panel-scoped lifecycle slots — those whose host DOM is
+      // inside the modal and disappears on close. form-top is excluded
+      // (legacy panel-scoped via addonCloseCbs). pill-action is excluded
+      // because the pill lives outside the modal and survives panel
+      // close; its lifecycle is owned by syncRecordingUI exclusively.
+      // review-media is the only Phase 3 panel-scoped lifecycle slot;
+      // future panel-scoped slots get added here as they ship.
+      const PANEL_CLOSE_UNMOUNTS = ["review-media"];
+      PANEL_CLOSE_UNMOUNTS.forEach((slotName) => {
+        if (slotState.has(slotName)) unmountAddonsForSlot(slotName);
       });
       addonCloseCbs.forEach((cb) => {
         try { cb(); } catch (err) { console.warn(`[PhoenixReplay] addon close hook failed: ${err.message}`); }
