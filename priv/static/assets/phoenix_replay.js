@@ -653,6 +653,174 @@
     return { ok: true };
   }
 
+  // ---- timeline bus (ADR-0005) ------------------------------------------
+  //
+  // rrweb-player publishes player-state changes (play/pause/seek/end) and
+  // progress ticks through this bus. Both admin `<.replay_player>` mounts
+  // (registered by player_hook.js) and the panel review-modal mini-player
+  // (registered by initMiniPlayer) participate, so consumers — admin
+  // audio_playback hook, review-media addon, future overlays — can sync
+  // off the same `subscribeTimeline(sessionId, callback, opts)` API
+  // regardless of which player is publishing.
+
+  const TIMELINE_EVENT = "phoenix_replay:timeline";
+  const SEEK_DELTA_THRESHOLD_MS = 500;
+
+  // session_id → rrweb-player instance. Populated by `registerPlayer`
+  // (called from initMiniPlayer + player_hook.js); read by tick callbacks
+  // in `subscribeTimeline`.
+  const timelinePlayers = new Map();
+  // session_id → list of subscriber entries `{callback, intervalId}`.
+  const timelineSubscribers = new Map();
+
+  function registerPlayer(sessionId, player) {
+    if (!sessionId || !player) return;
+    timelinePlayers.set(sessionId, player);
+  }
+
+  function unregisterPlayer(sessionId) {
+    if (!sessionId) return;
+    timelinePlayers.delete(sessionId);
+  }
+
+  function getPlayerForSession(sessionId) {
+    return timelinePlayers.get(sessionId) || null;
+  }
+
+  function dispatchTimeline(sessionId, kind, timecodeMs, speed) {
+    const detail = {
+      session_id: sessionId,
+      kind,
+      timecode_ms: typeof timecodeMs === "number" ? Math.round(timecodeMs) : 0,
+      speed: typeof speed === "number" ? speed : 1,
+    };
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(TIMELINE_EVENT, { detail }));
+    }
+    notifyTimelineSubscribers(sessionId, detail);
+  }
+
+  function notifyTimelineSubscribers(sessionId, detail) {
+    const list = timelineSubscribers.get(sessionId);
+    if (!list || list.length === 0) return;
+    for (const sub of list) {
+      try {
+        sub.callback(detail);
+      } catch (err) {
+        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
+      }
+    }
+  }
+
+  // Attach state-change listeners to a fresh rrweb-player instance and
+  // publish events on the bus. Detects user scrubs as discontinuities
+  // exceeding `speed * wallElapsed` by SEEK_DELTA_THRESHOLD_MS.
+  function wireTimelineBus(player, sessionId) {
+    if (!player || !sessionId) return;
+
+    let speed = 1;
+    let lastTimeMs = 0;
+    let lastTimeStamp = performance.now();
+    let lastDispatchedKind = null;
+
+    const emit = (kind, timecodeMs) =>
+      dispatchTimeline(sessionId, kind, timecodeMs, speed);
+
+    player.addEventListener("ui-update-player-state", (payload) => {
+      const state = typeof payload === "string" ? payload : payload?.payload;
+      if (state === "playing" && lastDispatchedKind !== "play") {
+        lastDispatchedKind = "play";
+        lastTimeStamp = performance.now();
+        emit("play", lastTimeMs);
+      } else if (state === "paused" && lastDispatchedKind !== "pause") {
+        lastDispatchedKind = "pause";
+        emit("pause", lastTimeMs);
+      }
+    });
+
+    player.addEventListener("ui-update-current-time", (payload) => {
+      const t = typeof payload === "number" ? payload : payload?.payload;
+      if (typeof t !== "number") return;
+
+      const now = performance.now();
+      const wallElapsed = now - lastTimeStamp;
+      const expectedDelta = wallElapsed * speed;
+      const actualDelta = t - lastTimeMs;
+      const drift = Math.abs(actualDelta - expectedDelta);
+
+      if (lastTimeMs > 0 && drift > SEEK_DELTA_THRESHOLD_MS) {
+        emit("seek", t);
+      }
+
+      lastTimeMs = t;
+      lastTimeStamp = now;
+    });
+
+    try {
+      const replayer = player.getReplayer?.();
+      replayer?.on?.("finish", () => emit("ended", lastTimeMs));
+    } catch (_) {
+      /* replayer not ready; ended event simply won't fire */
+    }
+  }
+
+  // Subscribe to timeline state events + per-subscriber tick cadence.
+  //
+  //   const stop = PhoenixReplay.subscribeTimeline(sessionId, fn, {
+  //     tick_hz: 10,           // default; 0 disables ticks
+  //     deliver_initial: true, // fire one :tick synchronously on subscribe
+  //   });
+  //   stop();
+  function subscribeTimeline(sessionId, callback, opts = {}) {
+    if (!sessionId || typeof callback !== "function") {
+      console.warn("[PhoenixReplay] subscribeTimeline requires sessionId + callback");
+      return () => {};
+    }
+
+    const tickHz = typeof opts.tick_hz === "number" ? opts.tick_hz : 10;
+    const deliverInitial = opts.deliver_initial !== false;
+
+    const tick = () => {
+      const player = getPlayerForSession(sessionId);
+      if (!player) return;
+      let t = 0;
+      try {
+        const replayer = player.getReplayer?.();
+        const got = replayer?.getCurrentTime?.();
+        if (typeof got === "number") t = got;
+      } catch (_) {
+        return;
+      }
+      try {
+        callback({
+          session_id: sessionId,
+          kind: "tick",
+          timecode_ms: Math.round(t),
+          speed: 1,
+        });
+      } catch (err) {
+        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
+      }
+    };
+
+    const intervalId = tickHz > 0 ? setInterval(tick, 1000 / tickHz) : null;
+    const entry = { callback, intervalId };
+
+    if (!timelineSubscribers.has(sessionId)) timelineSubscribers.set(sessionId, []);
+    timelineSubscribers.get(sessionId).push(entry);
+
+    if (deliverInitial && tickHz > 0) tick();
+
+    return function unsubscribe() {
+      if (entry.intervalId) clearInterval(entry.intervalId);
+      const list = timelineSubscribers.get(sessionId);
+      if (!list) return;
+      const idx = list.indexOf(entry);
+      if (idx >= 0) list.splice(idx, 1);
+      if (list.length === 0) timelineSubscribers.delete(sessionId);
+    };
+  }
+
   // ---- widget UI ---------------------------------------------------------
 
   // The panel (modal + multi-screen body) is created in both :float and
@@ -852,9 +1020,15 @@
     // "Continue without preview" stub.
     let miniPlayer = null;
 
+    // Synthetic session id for the panel mini-player. Single-instance
+    // (panel is a singleton), so a literal is fine — review-media
+    // addons subscribe to this id to sync with the player.
+    const MINI_PLAYER_SESSION_ID = "phx-replay-review";
+
     function destroyMiniPlayer() {
       if (!miniPlayer) return;
       try {
+        unregisterPlayer(MINI_PLAYER_SESSION_ID);
         // rrweb-player exposes a `.$destroy()` method (Svelte component).
         if (typeof miniPlayer.$destroy === "function") miniPlayer.$destroy();
       } catch (err) {
@@ -902,6 +1076,11 @@
             showController: true,
           },
         });
+        // Register on the timeline bus so review-media addons (audio
+        // sync, etc.) can subscribe to this player's play/pause/seek
+        // events under MINI_PLAYER_SESSION_ID.
+        registerPlayer(MINI_PLAYER_SESSION_ID, miniPlayer);
+        wireTimelineBus(miniPlayer, MINI_PLAYER_SESSION_ID);
       } catch (err) {
         console.warn("[PhoenixReplay] mini-player init failed:", err.message);
         container.innerHTML = `<div class="phx-replay-review-player-fallback">Playback failed. Continue to describe.</div>`;
@@ -972,6 +1151,11 @@
         slotEl,
         sessionId: () => client._internals?.sessionId?.() ?? null,
         sessionStartedAtMs: () => client._internals?.sessionStartedAtMs?.() ?? null,
+        // Session id of the panel mini-player (rrweb-player rendered in
+        // the REVIEW screen). Pass to PhoenixReplay.subscribeTimeline so
+        // a review-media addon can sync against play/pause/seek/tick
+        // without hard-coding the magic constant.
+        playerSessionId: MINI_PLAYER_SESSION_ID,
         onPanelClose: (cb) => addonCloseCbs.push(cb),
         reportError: (msg) => { errorMessage.textContent = msg; setScreen(SCREENS.ERROR); showModal(); },
         // Panel surface available to addon mount fns. Lets addons register
@@ -1712,6 +1896,15 @@
       });
     },
   };
+
+  // Timeline bus (ADR-0005) public API — admin player_hook.js, panel
+  // mini-player, and addon consumers (audio sync, overlays) all share
+  // these primitives so a single subscribe call works regardless of
+  // which player is publishing.
+  PhoenixReplay.subscribeTimeline = subscribeTimeline;
+  PhoenixReplay.wireTimelineBus = wireTimelineBus;
+  PhoenixReplay.registerPlayer = registerPlayer;
+  PhoenixReplay.unregisterPlayer = unregisterPlayer;
 
   // Internal factory exposed only for tests. Do not use from host code —
   // the surface may change without a CHANGELOG entry.

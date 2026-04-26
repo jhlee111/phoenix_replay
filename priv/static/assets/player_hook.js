@@ -27,26 +27,14 @@
   // `pending` buffers live appends that arrive before the player is
   // initialized (e.g. rrweb-player script still loading).
   const livePlayers = new Map();
-  // Per-session one-shot replay player registry — captures the
-  // rrweb-player instance for the timeline event bus (ADR-0005). Live
-  // players already track their instance under `livePlayers`.
-  const replayPlayers = new Map();
 
-  // ADR-0005 timeline event bus — emits state-change events to the
-  // window for any consumer to observe (audio sync, LV state debugger,
-  // overlays, etc). See `wireTimelineBus` for what we attach to and
-  // `dispatchTimeline` for the payload shape.
-  const TIMELINE_EVENT = "phoenix_replay:timeline";
-  // Heuristic for detecting user scrub vs. natural playback: if the
-  // current-time delta between two consecutive ui-update-current-time
-  // events exceeds (expected by speed) by more than this much, treat
-  // it as a seek. 500ms is well above RAF jitter at any speed.
-  const SEEK_DELTA_THRESHOLD_MS = 500;
-  // Per-session subscribers registered via `subscribeTimeline`. Each
-  // entry: `{callback, intervalId, tickHz}`. State events fan out to
-  // every subscriber regardless of `tickHz`; tick events come from
-  // each subscriber's own interval (independent throttling).
-  const subscribers = new Map();
+  // ADR-0005 timeline event bus moved to phoenix_replay.js so the
+  // panel mini-player can publish on the same channel as admin players.
+  // The bus primitives — `wireTimelineBus`, `registerPlayer`,
+  // `subscribeTimeline` — live on `window.PhoenixReplay`. This file
+  // resolves them lazily because phoenix_replay.js may load after
+  // player_hook.js depending on host script order.
+  const bus = () => global.PhoenixReplay;
 
   async function initOne(el) {
     if (el[INITIALIZED]) return;
@@ -101,8 +89,8 @@
       });
 
       const sessionId = el.getAttribute("data-session-id") || el.id;
-      replayPlayers.set(sessionId, { el, player });
-      wireTimelineBus(player, sessionId);
+      bus()?.registerPlayer?.(sessionId, player);
+      bus()?.wireTimelineBus?.(player, sessionId);
     } catch (err) {
       console.error("[PhoenixReplay] player init failed:", err);
       el.textContent = `Replay error: ${err.message}`;
@@ -164,7 +152,8 @@
       },
     });
     state.initialized = true;
-    wireTimelineBus(state.player, sessionId);
+    bus()?.registerPlayer?.(sessionId, state.player);
+    bus()?.wireTimelineBus?.(state.player, sessionId);
 
     // Flush appends buffered during the init window.
     if (state.pending.length > 0) {
@@ -217,173 +206,6 @@
     return probe();
   }
 
-  // ADR-0005 Phase 1 — attach state-change listeners and dispatch
-  // window CustomEvents on the timeline bus. Tick events + the
-  // `subscribeTimeline` helper land in Phase 2.
-  function wireTimelineBus(player, sessionId) {
-    if (!player || !sessionId) return;
-
-    let speed = 1;
-    let lastTimeMs = 0;
-    let lastTimeStamp = performance.now();
-    let lastDispatchedKind = null;
-
-    const emit = (kind, timecodeMs) =>
-      dispatchTimeline(sessionId, kind, timecodeMs, speed);
-
-    // play / pause come through the same event with a string payload.
-    // rrweb-player fires "playing" | "paused" | "live"; we only care
-    // about the first two for the public bus.
-    player.addEventListener("ui-update-player-state", (payload) => {
-      const state = typeof payload === "string" ? payload : payload?.payload;
-      if (state === "playing" && lastDispatchedKind !== "play") {
-        lastDispatchedKind = "play";
-        // Re-anchor the wall-clock so the first ui-update-current-time
-        // after resume isn't compared against an elapsed-during-pause
-        // wallElapsed (which would falsely trip the seek heuristic).
-        lastTimeStamp = performance.now();
-        emit("play", lastTimeMs);
-      } else if (state === "paused" && lastDispatchedKind !== "pause") {
-        lastDispatchedKind = "pause";
-        emit("pause", lastTimeMs);
-      }
-    });
-
-    // Current-time updates fire at RAF cadence while playing. Use them
-    // to (a) keep `lastTimeMs` fresh for state-change payloads, and
-    // (b) detect user scrubs as discontinuities exceeding what `speed`
-    // would predict for the wall-clock elapsed since the last update.
-    player.addEventListener("ui-update-current-time", (payload) => {
-      const t = typeof payload === "number" ? payload : payload?.payload;
-      if (typeof t !== "number") return;
-
-      const now = performance.now();
-      const wallElapsed = now - lastTimeStamp;
-      const expectedDelta = wallElapsed * speed;
-      const actualDelta = t - lastTimeMs;
-      const drift = Math.abs(actualDelta - expectedDelta);
-
-      if (lastTimeMs > 0 && drift > SEEK_DELTA_THRESHOLD_MS) {
-        emit("seek", t);
-      }
-
-      lastTimeMs = t;
-      lastTimeStamp = now;
-    });
-
-    // `replayer.on("finish")` is the canonical end-of-playback signal.
-    // Guard with try/catch — on alpha builds the replayer may not be
-    // ready synchronously after Player construction.
-    try {
-      const replayer = player.getReplayer?.();
-      replayer?.on?.("finish", () => emit("ended", lastTimeMs));
-    } catch (_) {
-      /* replayer not ready; ended event simply won't fire */
-    }
-  }
-
-  function dispatchTimeline(sessionId, kind, timecodeMs, speed) {
-    const detail = {
-      session_id: sessionId,
-      kind,
-      timecode_ms: typeof timecodeMs === "number" ? Math.round(timecodeMs) : 0,
-      speed: typeof speed === "number" ? speed : 1,
-    };
-    // 1. Window CustomEvent — escape hatch for advanced consumers.
-    window.dispatchEvent(new CustomEvent(TIMELINE_EVENT, { detail }));
-    // 2. Per-session subscribers (via subscribeTimeline) — friendlier
-    //    path that handles per-subscriber tick rate.
-    notifySubscribers(sessionId, detail);
-  }
-
-  function notifySubscribers(sessionId, detail) {
-    const list = subscribers.get(sessionId);
-    if (!list || list.length === 0) return;
-    for (const sub of list) {
-      try {
-        sub.callback(detail);
-      } catch (err) {
-        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
-      }
-    }
-  }
-
-  function getPlayerForSession(sessionId) {
-    return (
-      replayPlayers.get(sessionId)?.player ||
-      livePlayers.get(sessionId)?.player ||
-      null
-    );
-  }
-
-  // ADR-0005 Phase 2 — friendlier subscription helper. Most consumers
-  // should never need to talk to the raw `phoenix_replay:timeline`
-  // window event; subscribe here and get state events + a chosen tick
-  // cadence delivered straight to your callback.
-  //
-  //   const stop = PhoenixReplayAdmin.subscribeTimeline(sessionId, fn, {
-  //     tick_hz: 10,           // default; 0 disables ticks (state-only)
-  //     deliver_initial: true, // fire one :tick synchronously on subscribe
-  //   });
-  //   // ...later:
-  //   stop();
-  //
-  // Tick subscribers are independent — high-rate consumers don't pay
-  // for low-rate ones, and vice versa. State events (play/pause/seek/
-  // ended) reach every subscriber regardless of `tick_hz`.
-  function subscribeTimeline(sessionId, callback, opts = {}) {
-    if (!sessionId || typeof callback !== "function") {
-      console.warn("[PhoenixReplay] subscribeTimeline requires sessionId + callback");
-      return () => {};
-    }
-
-    const tickHz = typeof opts.tick_hz === "number" ? opts.tick_hz : 10;
-    const deliverInitial = opts.deliver_initial !== false;
-
-    const tick = () => {
-      const player = getPlayerForSession(sessionId);
-      if (!player) return;
-      let t = 0;
-      try {
-        const replayer = player.getReplayer?.();
-        const got = replayer?.getCurrentTime?.();
-        if (typeof got === "number") t = got;
-      } catch (_) {
-        return;
-      }
-      try {
-        callback({
-          session_id: sessionId,
-          kind: "tick",
-          timecode_ms: Math.round(t),
-          speed: 1,
-        });
-      } catch (err) {
-        console.error("[PhoenixReplay] timeline subscriber callback error:", err);
-      }
-    };
-
-    const intervalId = tickHz > 0 ? setInterval(tick, 1000 / tickHz) : null;
-    const entry = { callback, intervalId, tickHz };
-
-    if (!subscribers.has(sessionId)) subscribers.set(sessionId, []);
-    subscribers.get(sessionId).push(entry);
-
-    // `tick_hz: 0` means "no tick events at all" — deliver_initial is
-    // a no-op in that case so the contract stays clean for state-only
-    // consumers (e.g. annotation logs).
-    if (deliverInitial && tickHz > 0) tick();
-
-    return function unsubscribe() {
-      if (entry.intervalId) clearInterval(entry.intervalId);
-      const list = subscribers.get(sessionId);
-      if (!list) return;
-      const idx = list.indexOf(entry);
-      if (idx >= 0) list.splice(idx, 1);
-      if (list.length === 0) subscribers.delete(sessionId);
-    };
-  }
-
   function initAll(root = document) {
     root.querySelectorAll(`[${MOUNT_ATTR}]`).forEach(initOne);
   }
@@ -427,5 +249,13 @@
     observe();
   }
 
-  global.PhoenixReplayAdmin = { initAll, initOne, subscribeTimeline };
+  // PhoenixReplayAdmin keeps subscribeTimeline as a back-compat alias —
+  // existing consumers (audio_playback hook, host scripts) keep working
+  // unchanged while internally delegating to phoenix_replay.js's bus.
+  global.PhoenixReplayAdmin = {
+    initAll,
+    initOne,
+    subscribeTimeline: (sessionId, callback, opts) =>
+      bus()?.subscribeTimeline?.(sessionId, callback, opts) || (() => {}),
+  };
 })(window);
