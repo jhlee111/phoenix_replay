@@ -18,6 +18,7 @@
     sessionPath: "/session",
     eventsPath: "/events",
     submitPath: "/submit",
+    reportPath: "/report",
     // Batching.
     maxEventsPerBatch: 50,
     flushIntervalMs: 5000,
@@ -29,7 +30,8 @@
     // Widget UX.
     widgetText: "Report issue",
     position: "bottom_right",
-    recording: "continuous",
+    showSeverity: false,
+    allowPaths: ["report_now", "record_and_report"],
     severities: ["info", "low", "medium", "high", "critical"],
     defaultSeverity: "medium",
   };
@@ -290,11 +292,12 @@
       const resumed = sentResumeAttempt && res.resumed === true;
       const interrupted = sentResumeAttempt && res.resumed !== true;
 
-      if (interrupted && cfg.recording === "on_demand") {
-        // Don't silently adopt the server-minted fresh token — the
-        // user's consent was for the previous session. Drop the new
-        // session too (the server will abandon it on idle); let the
-        // panel surface the interruption and wait for Retry.
+      if (interrupted) {
+        // ADR-0006: every active session is the result of an explicit
+        // user click (Path B "Record and report"). A stale-token resume
+        // means that consent chain is broken — surface the error and
+        // wait for Retry rather than silently adopting a fresh server
+        // token.
         storageClear(STORAGE_KEYS.TOKEN);
         storageClear(STORAGE_KEYS.RECORDING);
         throw new PhoenixReplaySessionInterruptedError();
@@ -616,19 +619,26 @@
     const addonHooks = [];  // [{ id, beforeSubmit?, onPanelClose? }]
     const addonCloseCbs = [];
 
-    // Recording mode for this widget. `cfg` already merges DEFAULTS so
-    // `cfg.recording` is always defined ("continuous" by default); the
-    // `|| "continuous"` is defense-in-depth in case a future caller passes
-    // an explicit undefined override into Object.assign.
-    const currentRecordingMode = () => cfg.recording || "continuous";
+    // ADR-0006 Phase 2 transitional shim. The mode-aware addon spec
+    // (2026-04-25) registered audio addons with `modes: ["on_demand"]`.
+    // ADR-0006 dropped the recording attr; the new equivalent is
+    // "this addon mounts when allow_paths includes Path B
+    // (record_and_report)." Until Phase 4 renames `modes` to `paths`,
+    // this shim maps the legacy symbols:
+    //   "on_demand"  → mount when allowPaths includes record_and_report
+    //   "continuous" → mount when allowPaths includes report_now
+    function modeMatchesAllowPaths(modes) {
+      if (!modes) return true;
+      const allow = cfg.allowPaths || ["report_now", "record_and_report"];
+      return modes.some((m) => {
+        if (m === "on_demand") return allow.includes("record_and_report");
+        if (m === "continuous") return allow.includes("report_now");
+        return false;
+      });
+    }
 
     PANEL_ADDONS.forEach((addon) => {
-      // Mode filter — addons that declare `modes` only mount when the
-      // widget's recording mode matches. Recording mode is read from
-      // `cfg.recording` (threaded through init from data-recording).
-      if (addon.modes && !addon.modes.includes(currentRecordingMode())) {
-        return;
-      }
+      if (!modeMatchesAllowPaths(addon.modes)) return;
 
       const slotEl = slotEls.get(addon.slot);
       if (!slotEl) {
@@ -815,14 +825,13 @@
       const client = createClient(cfg);
       const panel = renderPanel(cfg.mount, client, cfg);
       const mode = cfg.mode === "headless" ? "headless" : "float";
-      const onDemand = cfg.recording === "on_demand";
 
       // `routedOpen` decides which screen the toggle / trigger / global
       // `open()` should surface:
       //   - on-demand + idle → Start CTA screen
       //   - anything else    → report form (backward-compat)
       function routedOpen() {
-        if (onDemand && !client.isRecording()) panel.openStart();
+        if (!client.isRecording()) panel.openStart();
         else panel.openForm();
       }
 
@@ -831,11 +840,11 @@
         toggle = renderToggle(panel.root, cfg, routedOpen);
       }
 
-      // The pill only appears for :float + :on_demand. Headless consumers
-      // bring their own indicator; `stopRecording()` still opens the form
-      // (see `handleStop`) so they land in the library's submit flow.
+      // Phase 2: pill renders for all :float widgets (it stays hidden via
+      // syncRecordingUI until startRecording transitions to :active). Phase 3
+      // will extend it with a pill-action slot for addons.
       let pill = null;
-      if (mode === "float" && onDemand) {
+      if (mode === "float") {
         pill = renderPill(panel.root, cfg, () => handleStop());
       }
 
@@ -871,15 +880,12 @@
         }
       }
 
-      // Called from the pill Stop button and the global `stopRecording`
-      // API. On-demand additionally opens the submit form so both the
-      // pill path and headless consumers land in the same library flow.
       async function handleStop() {
         const wasRecording = client.isRecording();
         await client.stopRecording();
         if (!wasRecording) return;
         syncRecordingUI();
-        if (onDemand) panel.openForm();
+        panel.openForm();
       }
 
       panel.onStart(handleStartFromPanel);
@@ -982,6 +988,35 @@
       document.querySelectorAll("[data-phoenix-replay]").forEach((el) => {
         if (el.dataset.phoenixReplayMounted) return;
         el.dataset.phoenixReplayMounted = "1";
+
+        const showSeverity = el.dataset.showSeverity === "true";
+
+        // Parse allow_paths CSV. Defensive: filter to known path values
+        // and warn on unknown atoms. A typo in the host's allow_paths
+        // attr (e.g. [:repor_now]) would otherwise silently degrade to
+        // "panel always opens CHOOSE."
+        const KNOWN_PATHS = new Set(["report_now", "record_and_report"]);
+        const rawPaths = (el.dataset.allowPaths || "report_now,record_and_report")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const allowPaths = rawPaths.filter((p) => KNOWN_PATHS.has(p));
+        const unknown = rawPaths.filter((p) => !KNOWN_PATHS.has(p));
+        if (unknown.length > 0) {
+          console.warn(
+            `[PhoenixReplay] unknown allow_paths values ignored: ${unknown.join(", ")}. ` +
+              `Allowed: report_now, record_and_report.`
+          );
+        }
+        const effectiveAllowPaths = allowPaths.length > 0
+          ? allowPaths
+          : ["report_now", "record_and_report"];
+
+        const bufferWindowSeconds = Number(el.dataset.bufferWindowSeconds);
+        const bufferWindowMs = Number.isFinite(bufferWindowSeconds) && bufferWindowSeconds > 0
+          ? bufferWindowSeconds * 1000
+          : DEFAULTS.bufferWindowMs;
+
         PhoenixReplay.init({
           mount: el,
           basePath: el.dataset.basePath,
@@ -989,7 +1024,9 @@
           widgetText: el.dataset.widgetText,
           position: el.dataset.position,
           mode: el.dataset.mode,
-          recording: el.dataset.recording,
+          showSeverity,
+          allowPaths: effectiveAllowPaths,
+          bufferWindowMs,
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));
       });
     },
