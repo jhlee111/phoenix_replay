@@ -389,8 +389,14 @@
       // Note: we do NOT call recorder.stop() — rrweb stays running so
       // the ring buffer keeps filling for any subsequent Report Now.
       cancelFlushTimer();
-      await flush();           // still in :active — flush() will run
-      transitionToPassive();
+      await flush();
+      // Flip to :passive but KEEP the session token alive so a
+      // follow-up report() can submit using the still-open session.
+      // report() itself clears the token after the submit POST. If
+      // the user starts a fresh recording instead, startRecording()
+      // already nulls token + clears storage at the top.
+      state = "passive";
+      storageClear(STORAGE_KEYS.RECORDING);
     }
 
     async function resetRecording() {
