@@ -1367,13 +1367,13 @@
       // ADR-0006 Phase 2: route based on allow_paths.
       //   both     → two-option CHOOSE screen
       //   only A   → straight to Path A form (no panel-choice friction)
-      //   only B   → straight to Path B start (recording immediately)
+      //   only B   → idle-start screen (pre-flight options + Start CTA)
       function routedOpen() {
         const paths = cfg.allowPaths || ["report_now", "record_and_report"];
         const aOnly = paths.length === 1 && paths[0] === "report_now";
         const bOnly = paths.length === 1 && paths[0] === "record_and_report";
-        if (aOnly) return panel.openPathAForm();   // Task 5 wires the panel method
-        if (bOnly) return handleStartFromPanel();
+        if (aOnly) return panel.openPathAForm();
+        if (bOnly) return panel.openStart();
         panel.openChoose();
       }
 
@@ -1507,7 +1507,12 @@
       panel.onStart(handleStartFromPanel);
       panel.onRetry(handleStartFromPanel);
       panel.onChooseReportNow(() => panel.openPathAForm());
-      panel.onChooseRecord(() => handleStartFromPanel());
+      // Path B's choose card now opens idle-start so addons in the
+      // idle-start-options slot (e.g. the voice-commentary toggle) get
+      // a chance to render + register canStart hooks before the user
+      // clicks Start. The Start button itself routes through
+      // handleStartFromPanel.
+      panel.onChooseRecord(() => panel.openStart());
       panel.onReRecord(handleReRecord);
       panel.onContinue(handleContinue);
       panel.onPathASubmit(async (formData) => {
