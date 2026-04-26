@@ -10,13 +10,15 @@ defmodule PhoenixReplay.Router do
         feedback_routes "/feedback"
       end
 
-  Mounts three POST endpoints under `path` guarded by
+  Mounts four POST endpoints under `path` guarded by
   `PhoenixReplay.Plug.Identify`:
 
     * `POST /session` — mint a server-signed session token for a new
       recording.
     * `POST /events`  — append a batch of rrweb events to an open session.
     * `POST /submit`  — finalize the session into a `Feedback` record.
+    * `POST /report`  — Path A single-shot ingest (events + description
+      in one body); no prior session required.
 
   ## Admin
 
@@ -47,6 +49,7 @@ defmodule PhoenixReplay.Router do
         post "/session", PhoenixReplay.SessionController, :create
         post "/events", PhoenixReplay.EventsController, :append
         post "/submit", PhoenixReplay.SubmitController, :create
+        post "/report", PhoenixReplay.ReportController, :create
       end
 
       _ = opts
