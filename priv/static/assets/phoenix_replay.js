@@ -623,7 +623,7 @@
               <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
             </label>
             <div class="phx-replay-panel-addons" data-slot="form-top"></div>
-            <label>
+            <label class="phx-replay-severity-field" hidden>
               <span>Severity</span>
               <select name="severity">
                 ${cfg.severities.map(s => `<option value="${s}"${s === cfg.defaultSeverity ? " selected" : ""}>${s}</option>`).join("")}
@@ -666,6 +666,16 @@
       </div>
     `;
     mountEl.appendChild(root);
+
+    // ADR-0006 D5: severity defaults to hidden on both forms (Path A
+    // and Path B). Hosts opt in via show_severity to expose the field
+    // to end users — typically only QA-internal portals where the
+    // reporter is also the triager. Un-hide both labels in lock-step.
+    if (cfg.showSeverity) {
+      root.querySelectorAll(".phx-replay-severity-field").forEach((el) => {
+        el.removeAttribute("hidden");
+      });
+    }
 
     const modal = root.querySelector(".phx-replay-modal");
     const form = root.querySelector(".phx-replay-screen--form");
@@ -773,6 +783,16 @@
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const data = new FormData(form);
+
+      // Severity field is hidden by default; show_severity un-hides it.
+      // When hidden, strip the FormData entry so the panel doesn't ship
+      // a value the host chose to suppress (parallel to the Path A
+      // submit listener — see Task 5).
+      const severityField = form.querySelector(".phx-replay-severity-field");
+      if (severityField && severityField.hidden) {
+        data.delete("severity");
+      }
+
       status.textContent = "Sending…";
 
       // Run all addon beforeSubmit hooks in registration order, merging
@@ -797,7 +817,7 @@
       try {
         await client.report({
           description: data.get("description"),
-          severity: data.get("severity"),
+          severity: data.get("severity") || undefined,
           jamLink: data.get("jam_link") || null,
           extras: merged,
         });
