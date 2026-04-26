@@ -22,6 +22,96 @@ Smoke verified in Chrome on the ash_feedback_demo continuous + on-demand-float +
 on-demand-headless pages — see Phase 1.5 smoke matrix in
 `docs/superpowers/plans/2026-04-25-mode-aware-panel-addons.md`.
 
+### ADR-0006 Phase 2 — Two-option entry panel + Path A UX (2026-04-25)
+
+The `<.phoenix_replay_widget>` `recording` attr is **removed** (ADR-0006
+Q-F). Hosts that previously passed `recording={:continuous}` or
+`recording={:on_demand}` will see Phoenix's compile-time error for an
+unknown attr — drop the attr; the new model decides path per-report
+based on user click rather than host compile-time config.
+
+Three new attrs replace it:
+
+- `show_severity` (boolean, default `false`) — gate the Low/Medium/High
+  severity field on both submit forms. Default off because end users
+  aren't equipped to triage their own reports; flip on for QA-internal
+  portals.
+- `allow_paths` (list of atoms, default `[:report_now,
+  :record_and_report]`) — restrict which paths the entry panel offers.
+  Single-path widgets skip the two-option panel and go straight to
+  that path's UI.
+- `buffer_window_seconds` (integer, default `60`) — sliding ring buffer
+  window in seconds; tune for memory or capture-window needs.
+
+Panel behavior:
+
+- Clicking the toggle (or any `[data-phoenix-replay-trigger]`, or
+  calling `window.PhoenixReplay.openPanel()`) opens a new CHOOSE screen
+  with two equal-weight cards: "Report now" (Path A — drains the ring
+  buffer to `/report` in one POST) and "Record and report" (Path B —
+  starts an `:active` session and shows the pill, identical to the old
+  `:on_demand` flow).
+- `allow_paths: [:report_now]` skips CHOOSE and opens the Path A form
+  directly. `allow_paths: [:record_and_report]` skips CHOOSE and starts
+  recording immediately.
+
+New JS API surface on `window.PhoenixReplay`:
+
+- `openPanel()` — opens the panel and routes per `allow_paths` (CHOOSE
+  or single-path skip). Equivalent to a trigger click.
+- `reportNow()` — opens the Path A form directly.
+- `recordAndReport()` — kicks off Path B (session + pill) directly.
+- `client.reportNow({description, severity, metadata, jamLink, extras})`
+  — internal client method that snapshots the ring buffer, POSTs to
+  `/report` in a single request, and only drains the buffer on success
+  (so a 5xx/network failure leaves captured events for retry). Public
+  surface is the wrapper above.
+
+The `open()` global is preserved as a backwards-compat alias for
+`openPanel()` so existing `[data-phoenix-replay-trigger]` wiring keeps
+working unchanged.
+
+The `:continuous`-widget Send button is **restored** end-to-end via
+this Phase 2: trigger click → CHOOSE → Report now → POST `/report`
+succeeds and a Feedback row lands in admin. The Phase 1 interim
+regression is closed.
+
+The mode-aware addon `modes:["on_demand"]` filter shipped in
+2026-04-25 is preserved via a transitional shim that maps it to
+`allow_paths`-based mounting (`"on_demand"` mounts when
+`allow_paths` includes `:record_and_report`). ADR-0006 Phase 4
+will rename `modes` to `paths` directly.
+
+The HTML `hidden` attribute does not exclude form fields from
+serialization, so both forms strip `severity` from the submitted
+FormData when its `<label class="phx-replay-severity-field">` is
+hidden — the panel must not ship a value the host opted out of via
+`show_severity: false`.
+
+`createRingBuffer` gains a non-destructive `snapshot()` method
+alongside `drain()` for the snapshot-then-drain-on-success pattern
+in `client.reportNow`.
+
+Smoke verified in Chrome on the ash_feedback_demo continuous +
+on-demand-float pages — all 8 rows of the smoke matrix in
+`docs/superpowers/plans/2026-04-25-unified-entry-phase-2.md` Task 9
+green: data attrs flow through, CHOOSE renders with cards, Path A
+submit reaches `/report` 201 with events drained from the buffer,
+admin shows the new feedback row, Path B start→Stop→Send sequence
+fires `/session`+`/events`+`/submit` 201, programmatic `reportNow()`
+and `recordAndReport()` skip the panel as designed.
+
+**Out of scope, deferred to Phase 2b**: F1 (changeset leak in /report
+500/422 responses), F3 (body-size cap on /report), F4 (rate limit on
+/report), F9 (metadata merge order audit). All are pre-existing
+issues in the Phase 1 controller that real hosts will hit before
+pre-prod shake-out.
+
+**Out of scope, deferred to Phase 3**: pill `pill-action` slot,
+review step (`review-media` slot, mini rrweb-player, Re-record),
+addon `paths: [...]` rename. Audio addon migration from `form-top`
+to the new slots happens alongside Phase 3.
+
 ### ADR-0006 Phase 1 — capture model + Path A ingest (2026-04-25)
 
 Recorder restructured around an internal `:passive` / `:active` state
