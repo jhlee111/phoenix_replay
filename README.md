@@ -424,6 +424,43 @@ def handle_info({:session_abandoned, _, _}, socket), do: ...
 Point the library at your existing PubSub via `config :phoenix_replay,
 :pubsub, MyApp.PubSub` so subscribers and broadcasters share one bus.
 
+### 6a. Subscribe to player timeline events (optional)
+
+The replay player (one-shot `<.replay_player>` and the live-mode
+session-watch LV) broadcasts a small JS event stream so any consumer
+on the same page can sync to playback state — audio narration, an
+LV-state debugger, network-timeline overlays, custom captions —
+without having to own the rrweb-player instance.
+
+Two surfaces:
+
+- A window `CustomEvent` channel `phoenix_replay:timeline` carrying
+  `{session_id, kind, timecode_ms, speed}` for every state change
+  (`play` / `pause` / `seek` / `ended`).
+- A friendlier per-session helper
+  `window.PhoenixReplayAdmin.subscribeTimeline(sessionId, callback,
+  opts)` that adds consumer-controlled `:tick` events at a chosen
+  cadence and returns an `unsubscribe` function.
+
+Minimal audio-element sync:
+
+```js
+const audio = document.querySelector("audio#narration");
+const stop = window.PhoenixReplayAdmin.subscribeTimeline(
+  sessionId,
+  ({ kind, timecode_ms }) => {
+    if (kind === "play")  audio.play().catch(() => {});
+    if (kind === "pause") audio.pause();
+    if (kind === "seek")  audio.currentTime = timecode_ms / 1000;
+  },
+  { tick_hz: 10 }
+);
+```
+
+See [`docs/guides/timeline-event-bus.md`](docs/guides/timeline-event-bus.md)
+for the full reference — every event kind, payload shape, all
+options, four worked use cases, and lifecycle / cleanup notes.
+
 ### 7. Build your admin UI
 
 The library ships the JSON endpoints + the `rrweb-player` LiveView hook.
@@ -452,6 +489,10 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 - [`docs/guides/on-demand-recording.md`](docs/guides/on-demand-recording.md)
   — `recording={:on_demand}` trade-offs, `:float` and `:headless`
   flows, pill positioning, multi-tab scope
+- [`docs/guides/timeline-event-bus.md`](docs/guides/timeline-event-bus.md)
+  — `phoenix_replay:timeline` window event + `subscribeTimeline`
+  helper for syncing audio / overlays / debuggers to the replay
+  cursor (ADR-0005)
 - [`docs/plans/README.md`](docs/plans/README.md) — forward-looking
   plan index (5f / 6)
 
