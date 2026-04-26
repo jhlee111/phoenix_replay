@@ -228,5 +228,35 @@ defmodule PhoenixReplay.ReportControllerTest do
       assert ok_a.status == 201
       assert ok_b.status == 201
     end
+
+    test "F9: host metadata wins when client and host share a key", %{conn: conn} do
+      prior_metadata = Application.get_env(:phoenix_replay, :metadata)
+      Application.put_env(:phoenix_replay, :metadata, fn _conn ->
+        %{"page" => "host-wins", "host_only" => "x"}
+      end)
+
+      on_exit(fn ->
+        case prior_metadata do
+          nil -> Application.delete_env(:phoenix_replay, :metadata)
+          v -> Application.put_env(:phoenix_replay, :metadata, v)
+        end
+      end)
+
+      params = %{
+        "description" => "merge order",
+        "metadata" => %{"page" => "client-loses", "client_only" => "y"}
+      }
+
+      conn = PhoenixReplay.ReportController.create(conn, params)
+
+      assert conn.status == 201
+      assert {_session_id, submit_params, _identity} = RecordingStorage.last_submit()
+
+      # Collision — host wins
+      assert submit_params["metadata"]["page"] == "host-wins"
+      # Non-collision — both pass through
+      assert submit_params["metadata"]["host_only"] == "x"
+      assert submit_params["metadata"]["client_only"] == "y"
+    end
   end
 end

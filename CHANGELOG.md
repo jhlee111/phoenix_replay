@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0006 Phase 2b — `/report` hardening (2026-04-26)
+
+Closes the four production-blocker follow-ups deferred from Phase 1
+(F1, F3, F4, F9 in
+`docs/superpowers/specs/2026-04-25-unified-feedback-entry-design.md`):
+
+- **F1 — sanitized 422/500 bodies.** Both `/report` and `/submit`
+  now serialize `Ecto.Changeset` errors via
+  `PhoenixReplay.ChangesetErrors.serialize/1` (which uses
+  `Ecto.Changeset.traverse_errors/2`) instead of leaking
+  `inspect(changeset)` strings. The 500 catch-all on `/report` runs
+  through the same serializer for consistency.
+- **F3 — body-size cap on `POST /report`.** New `:max_report_bytes`
+  limit (default 5 MB) rejects oversized requests with 413 before
+  parsing, mirroring `EventsController.check_body_size/2`. Hosts that
+  raised `buffer_window_seconds` past ~90s should bump this to match.
+- **F4 — per-actor rate limit on `POST /report`.** New
+  `:report_rate_per_minute` limit (default 10/min) returns 429 with a
+  `retry-after` header. Distinct rate-limit key from
+  `EventsController` so Path B traffic doesn't consume Path A quota
+  and vice versa.
+- **F9 — metadata merge order pinned.** Twin regression tests in
+  `report_controller_test.exs` + `submit_controller_test.exs` assert
+  that host metadata wins on collision (matching the current
+  `client |> stringify |> Map.merge(stringify(host))` order in both
+  controllers). No production code change — this is regression
+  protection only.
+
+No host-side migration required. Hosts that need a larger body cap or
+a more permissive rate limit can override:
+
+```elixir
+config :phoenix_replay,
+  limits: [
+    max_report_bytes: 8_388_608,
+    report_rate_per_minute: 30
+  ]
+```
+
+ADR-0006 follow-up table: F1, F3, F4, F9 → resolved. F2 (orphan-events
+GC), F5/F6/F8/F12 (cleanups), F7 (JS test infra), F10/F11 (Scrub +
+Hook robustness) remain open per the spec table — not blocking
+production for ADR-0006.
+
 ### Mode-aware panel addons (2026-04-25)
 
 - `registerPanelAddon` accepts an optional `modes` array. When present, the addon

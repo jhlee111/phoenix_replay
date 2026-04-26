@@ -82,6 +82,39 @@ defmodule PhoenixReplay.SubmitControllerTest do
     end
   end
 
+  describe "POST /submit — metadata merge order" do
+    test "F9: host metadata wins when client and host share a key", %{
+      conn: conn,
+      session_id: session_id
+    } do
+      prior_metadata = Application.get_env(:phoenix_replay, :metadata)
+      Application.put_env(:phoenix_replay, :metadata, fn _conn ->
+        %{"page" => "host-wins", "host_only" => "x"}
+      end)
+
+      on_exit(fn ->
+        case prior_metadata do
+          nil -> Application.delete_env(:phoenix_replay, :metadata)
+          v -> Application.put_env(:phoenix_replay, :metadata, v)
+        end
+      end)
+
+      params = %{
+        "description" => "merge order",
+        "metadata" => %{"page" => "client-loses", "client_only" => "y"}
+      }
+
+      conn = PhoenixReplay.SubmitController.create(conn, params)
+
+      assert conn.status == 201
+      assert {^session_id, submit_params, _identity} = RecordingStorage.last_submit()
+
+      assert submit_params["metadata"]["page"] == "host-wins"
+      assert submit_params["metadata"]["host_only"] == "x"
+      assert submit_params["metadata"]["client_only"] == "y"
+    end
+  end
+
   # Helpers
 
   defp restore(key, nil), do: Application.delete_env(:phoenix_replay, key)
