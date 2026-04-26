@@ -114,6 +114,21 @@ defmodule PhoenixReplay.UI.Components do
     default: @default_network_src,
     doc: "Script URL for rrweb network plugin. Pass `nil` to disable."
 
+  attr :rrweb_player_src, :string,
+    default: "https://unpkg.com/rrweb-player@2.0.0-alpha.18/dist/rrweb-player.umd.cjs",
+    doc:
+      "Script URL for rrweb-player UMD. Used by Path B's review step " <>
+        "to render the mini playback before the user submits. Emitted " <>
+        "only when `allow_paths` includes `:record_and_report`. Pass " <>
+        "`nil` to disable — the review step degrades to a 'Continue " <>
+        "without preview' UI in that case."
+
+  attr :rrweb_player_style_src, :string,
+    default: "https://unpkg.com/rrweb-player@2.0.0-alpha.18/dist/style.css",
+    doc:
+      "Stylesheet URL for rrweb-player. Pass `nil` to disable. Loaded " <>
+        "alongside the player script for Path B-capable widgets."
+
   attr :asset_path, :string,
     default: "/phoenix_replay",
     doc:
@@ -171,11 +186,15 @@ defmodule PhoenixReplay.UI.Components do
   worked examples.
   """
   def phoenix_replay_widget(assigns) do
+    assigns = assign(assigns, :path_b_enabled, :record_and_report in (assigns[:allow_paths] || []))
+
     ~H"""
     <link :if={@asset_path} rel="stylesheet" href={"#{@asset_path}/phoenix_replay.css"} />
     <script :if={@rrweb_src} src={@rrweb_src} crossorigin="anonymous"></script>
     <script :if={@rrweb_console_src} src={@rrweb_console_src} crossorigin="anonymous"></script>
     <script :if={@rrweb_network_src} src={@rrweb_network_src} crossorigin="anonymous"></script>
+    <link :if={@path_b_enabled and @rrweb_player_style_src} rel="stylesheet" href={@rrweb_player_style_src} crossorigin="anonymous" />
+    <script :if={@path_b_enabled and @rrweb_player_src} src={@rrweb_player_src} crossorigin="anonymous"></script>
     <script :if={@asset_path} src={"#{@asset_path}/phoenix_replay.js"} defer></script>
     <div
       data-phoenix-replay

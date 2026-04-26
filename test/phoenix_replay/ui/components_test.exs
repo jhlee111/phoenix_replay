@@ -148,7 +148,9 @@ defmodule PhoenixReplay.UI.ComponentsTest do
           csrf_token: "x",
           rrweb_src: nil,
           rrweb_console_src: nil,
-          rrweb_network_src: nil
+          rrweb_network_src: nil,
+          rrweb_player_src: nil,
+          rrweb_player_style_src: nil
         )
 
       refute html =~ "rrweb"
@@ -289,6 +291,41 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       refute html =~ "phoenix_replay.js"
       # mount div still present — host is expected to self-host library JS
       assert html =~ ~s(data-phoenix-replay)
+    end
+
+    test "rrweb_player_src + style emitted when allow_paths includes :record_and_report" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ "rrweb-player@2.0.0-alpha.18"
+      assert html =~ "style.css"
+    end
+
+    test "rrweb_player_src suppressed when allow_paths is report_now-only" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          allow_paths: [:report_now]
+        )
+
+      refute html =~ "rrweb-player@2.0.0-alpha.18"
+    end
+
+    test "rrweb_player_src custom URL is honored" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          rrweb_player_src: "/assets/my-player.js",
+          rrweb_player_style_src: "/assets/my-player.css"
+        )
+
+      assert html =~ ~s(src="/assets/my-player.js")
+      assert html =~ ~s(href="/assets/my-player.css")
     end
   end
 end

@@ -741,6 +741,61 @@
     function showModal() { modal.setAttribute("aria-hidden", "false"); }
     function hideModal() { modal.setAttribute("aria-hidden", "true"); }
 
+    // Mini rrweb-player instance for the REVIEW screen (Phase 3).
+    // Lazily created when openReview() is called with events. Replaced
+    // on Re-record (the second call destroys the previous instance and
+    // creates a fresh one against the new events). The widget component
+    // emits the rrweb-player UMD script tag for Path B-capable widgets;
+    // if it didn't load (network failure, host disabled it, Path A-only
+    // widget reached this code via a programmatic call), we surface a
+    // "Continue without preview" stub.
+    let miniPlayer = null;
+
+    function destroyMiniPlayer() {
+      if (!miniPlayer) return;
+      try {
+        // rrweb-player exposes a `.$destroy()` method (Svelte component).
+        if (typeof miniPlayer.$destroy === "function") miniPlayer.$destroy();
+      } catch (err) {
+        console.warn("[PhoenixReplay] mini-player destroy failed:", err.message);
+      }
+      miniPlayer = null;
+      const container = root.querySelector("[data-phx-replay-mini-player]");
+      if (container) container.innerHTML = "";
+    }
+
+    function initMiniPlayer(events) {
+      destroyMiniPlayer();
+      const container = root.querySelector("[data-phx-replay-mini-player]");
+      if (!container) return;
+      if (!global.rrwebPlayer) {
+        container.innerHTML = `<div class="phx-replay-review-player-fallback">Playback unavailable. Continue to describe.</div>`;
+        return;
+      }
+      // rrweb-player needs at least 2 events to construct a timeline.
+      // Single-event recordings (rare — basically a Stop without any
+      // captured action) bypass the player and show a stub.
+      if (!Array.isArray(events) || events.length < 2) {
+        container.innerHTML = `<div class="phx-replay-review-player-fallback">Recording too short to preview. Continue to describe.</div>`;
+        return;
+      }
+      try {
+        miniPlayer = new global.rrwebPlayer({
+          target: container,
+          props: {
+            events,
+            width: container.clientWidth,
+            height: 256,
+            autoPlay: false,
+            showController: true,
+          },
+        });
+      } catch (err) {
+        console.warn("[PhoenixReplay] mini-player init failed:", err.message);
+        container.innerHTML = `<div class="phx-replay-review-player-fallback">Playback failed. Continue to describe.</div>`;
+      }
+    }
+
     function openForm() { setScreen(SCREENS.FORM); showModal(); }
     function openStart() { setScreen(SCREENS.IDLE_START); showModal(); }
     function openError(message) {
@@ -750,7 +805,11 @@
     }
     function openChoose() { setScreen(SCREENS.CHOOSE); showModal(); }
     function openPathAForm() { setScreen(SCREENS.PATH_A_FORM); showModal(); }
-    function openReview() { setScreen(SCREENS.REVIEW); showModal(); }
+    function openReview(events) {
+      initMiniPlayer(events);
+      setScreen(SCREENS.REVIEW);
+      showModal();
+    }
 
     // Mount panel addons against their slots. Each addon's mount(ctx)
     // returns optional { beforeSubmit, onPanelClose } hooks; we collect
@@ -808,6 +867,7 @@
       hideModal();
       form.reset();
       status.textContent = "";
+      destroyMiniPlayer();
       // Reset to the CHOOSE screen so a fresh open() without routing
       // always starts at the entry panel. The init orchestrator can
       // override via single-path skip when allow_paths has one entry.
@@ -1121,6 +1181,33 @@
         await client.stopRecording();
         if (!wasRecording) return;
         syncRecordingUI();
+        // Phase 3: Stop opens REVIEW (mini-player + addons). Continue
+        // advances to the describe step (legacy FORM); Re-record
+        // discards events and starts a fresh active session.
+        const events = client.takeReviewEvents();
+        panel.openReview(events);
+      }
+
+      async function handleReRecord() {
+        // Re-record from review = discard the just-captured events
+        // (already drained by takeReviewEvents in handleStop) and start
+        // a fresh active session. The pill swaps back in via
+        // syncRecordingUI; the panel closes so the pill is the only UI.
+        try {
+          await client.startRecording();
+          syncRecordingUI();
+          panel.close();
+        } catch (err) {
+          panel.openError(`Couldn't restart recording: ${err.message}`);
+        }
+      }
+
+      function handleContinue() {
+        // Advance to the describe step (legacy FORM). The mini-player
+        // is destroyed on panel.close (final Send) — the in-modal
+        // screen swap leaves the player around but hidden under the
+        // active screen until close, which is fine since the user only
+        // sees one screen at a time.
         panel.openForm();
       }
 
@@ -1128,6 +1215,8 @@
       panel.onRetry(handleStartFromPanel);
       panel.onChooseReportNow(() => panel.openPathAForm());
       panel.onChooseRecord(() => handleStartFromPanel());
+      panel.onReRecord(handleReRecord);
+      panel.onContinue(handleContinue);
       panel.onPathASubmit(async (formData) => {
         await client.reportNow({
           description: formData.get("description"),
