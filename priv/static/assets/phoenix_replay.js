@@ -800,7 +800,18 @@
       destroyMiniPlayer();
       const container = root.querySelector("[data-phx-replay-mini-player]");
       if (!container) return;
-      if (!global.rrwebPlayer) {
+      // rrweb-player's UMD bundle exposes the namespace { Player,
+      // default } on window.rrwebPlayer, not the constructor itself.
+      // Resolve the actual constructor: prefer `default` (Svelte's
+      // UMD default export); fall back to `Player` (named alias). If
+      // a future bundle ships the constructor directly, support that
+      // too.
+      const RrwebPlayerCtor =
+        typeof global.rrwebPlayer === "function"
+          ? global.rrwebPlayer
+          : (global.rrwebPlayer && (global.rrwebPlayer.default || global.rrwebPlayer.Player));
+
+      if (!RrwebPlayerCtor) {
         container.innerHTML = `<div class="phx-replay-review-player-fallback">Playback unavailable. Continue to describe.</div>`;
         return;
       }
@@ -812,7 +823,7 @@
         return;
       }
       try {
-        miniPlayer = new global.rrwebPlayer({
+        miniPlayer = new RrwebPlayerCtor({
           target: container,
           props: {
             events,
