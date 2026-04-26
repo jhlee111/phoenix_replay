@@ -149,13 +149,17 @@ consumers) can wire in without spelunking through `player_hook.js`.
 
 ## Decisions log (from ADR-0005)
 
-- [ ] **OQ1** — `deliver_initial: true` default. Confirmed in the
-      proposal.
-- [ ] **OQ2** — `:speed_changed` shipped as a separate kind.
-      Pending impl confirmation that rrweb-player exposes the
-      hook.
-- [ ] **OQ3** — `setInterval` anchor (wall-clock). RAF rejected
-      due to hidden-tab throttling.
+- [x] **OQ1** — `deliver_initial: true` default. Shipped per spec.
+- [x] **OQ2** — `:speed_changed` deferred. Instead, every payload
+      (state events + ticks) carries a `speed` field as forward-compat
+      surface. The field is currently hardcoded to `1` in
+      `player_hook.js`'s `wireTimelineBus`; consumers (e.g.
+      ash_feedback's `audio_playback.js`) reconcile via `lastSpeed`
+      and will start receiving real values when the rrweb-player
+      speed-UI wiring lands. Tracked as an open follow-up in
+      `docs/plans/README.md`.
+- [x] **OQ3** — `setInterval` anchor (wall-clock). Shipped per spec;
+      each tick reads `getCurrentTime()` so drift never compounds.
 
 Promoted to `active/` 2026-04-24 (ADR-0005 Accepted).
 

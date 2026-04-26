@@ -51,6 +51,13 @@ between rrweb-player state changes.
 
 ## Event kinds
 
+> **`speed` field today:** All event payloads include a `speed` field
+> for forward-compat. It is currently hardcoded to `1` in
+> `player_hook.js`'s `wireTimelineBus`. Consumers should still read it
+> on every event (and reconcile via a `lastSpeed` cache) so they pick
+> up real values transparently when the rrweb-player speed-UI wiring
+> lands. See [Speed reconciliation](#speed-reconciliation) below.
+
 Every event payload has the same shape:
 
 ```js
@@ -71,7 +78,7 @@ catch-up.
 | Field | Notes |
 |---|---|
 | `timecode_ms` | The position the player resumed from. After a pause the value matches the last `pause` event's `timecode_ms`; on first play it's `0` (or wherever an immediate `seek` left the cursor). |
-| `speed` | `1` today (see Speed reconciliation). |
+| `speed` | Current playback rate (see header note). |
 
 The hook deduplicates rapid duplicate state changes — two `playing`
 notifications back-to-back from rrweb-player only emit one `play`
@@ -86,7 +93,7 @@ auto-pauses while a long-running rrweb event processes.
 | Field | Notes |
 |---|---|
 | `timecode_ms` | The position the cursor sat at when paused. |
-| `speed` | `1` today. |
+| `speed` | Current playback rate (see header note). |
 
 Like `play`, deduplicated against repeat notifications.
 
@@ -101,7 +108,7 @@ exceeds the predicted delta by more than 500ms, that's a seek.
 | Field | Notes |
 |---|---|
 | `timecode_ms` | The new cursor position post-jump. |
-| `speed` | `1` today. |
+| `speed` | Current playback rate (see header note). |
 
 **Edge cases**:
 
@@ -126,7 +133,7 @@ keeps growing as new rrweb events arrive).
 | Field | Notes |
 |---|---|
 | `timecode_ms` | The final cursor position when the player finished. |
-| `speed` | `1` today. |
+| `speed` | Current playback rate (see header note). |
 
 The hook attaches the `finish` listener defensively (`try`/`catch`)
 because rrweb-player's `getReplayer()` may not be ready synchronously
@@ -143,7 +150,7 @@ ticks are per-subscriber to keep cost proportional to demand.
 | Field | Notes |
 |---|---|
 | `timecode_ms` | `Math.round(replayer.getCurrentTime())` at the moment the tick fires. |
-| `speed` | `1` today (see Speed reconciliation). |
+| `speed` | Current playback rate (see header note). |
 
 **Cadence rules** (more in `subscribeTimeline` below):
 
@@ -242,7 +249,7 @@ Unsubscribing twice is safe — the second call is a no-op.
 The killer consumer. `ash_feedback` ships an `<.audio_playback>`
 component whose hook subscribes to the bus and reconciles a hidden
 `<audio>` element on every event. See the
-[ash_feedback audio narration guide](https://github.com/jhlee111/ash_feedback/blob/main/docs/guides/audio-narration.md)
+[ash_feedback audio narration guide](https://github.com/jhlee111/ash_feedback/blob/5e64137/docs/guides/audio-narration.md)
 for the full sync rules (drift correction, offset windows, autoplay-policy
 fallback).
 
@@ -286,6 +293,9 @@ offset; LiveView `mounted`/`destroyed` lifecycle integration; and
 graceful degradation when `subscribeTimeline` isn't on the page yet.
 
 ### 2. LiveView state debugger overlay
+
+> Sketch — none of this snapshot-stream infrastructure ships today;
+> the example shows how you'd wire it if you had one.
 
 Given an offline snapshot stream of `socket.assigns` keyed by
 recording timecode, render the assigns tree at the current cursor
@@ -413,7 +423,7 @@ different cursors.
   — design rationale, alternatives considered, scope boundaries.
 - [ADR-0004](../decisions/0004-live-session-watch.md) — the
   live-mode player flavor that also emits on this bus.
-- [`ash_feedback` audio narration guide](https://github.com/jhlee111/ash_feedback/blob/main/docs/guides/audio-narration.md)
+- [`ash_feedback` audio narration guide](https://github.com/jhlee111/ash_feedback/blob/5e64137/docs/guides/audio-narration.md)
   — first production consumer; the worked example for audio-element
   sync at scale.
 - `priv/static/assets/player_hook.js` — the implementation. Read
