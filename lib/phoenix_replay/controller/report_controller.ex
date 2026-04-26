@@ -17,138 +17,122 @@ defmodule PhoenixReplay.ReportController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{ChangesetErrors, Config, Hook, RateLimiter, Scrub, Storage}
+  import PhoenixReplay.Controller.Helpers, only: [fetch_id: 1, stringify_keys: 1]
+
+  alias PhoenixReplay.{ChangesetErrors, Config, Hook, Scrub, Storage}
+  alias PhoenixReplay.Ingest.{Error, Pipeline}
   alias PhoenixReplay.Plug.Identify
 
   @default_limits [max_report_bytes: 5_242_880, report_rate_per_minute: 10]
   @default_severity "medium"
 
   def create(conn, params) do
-    identity = Identify.fetch(conn) || %{kind: :anonymous}
-    limits = Keyword.merge(@default_limits, Config.limits())
+    ctx = %{
+      conn: conn,
+      params: params,
+      identity: Identify.fetch(conn) || %{kind: :anonymous},
+      limits: Keyword.merge(@default_limits, Config.limits())
+    }
 
-    with :ok <- check_actor_rate(identity, limits),
-         :ok <- check_body_size(conn, limits),
-         {:ok, description} <- fetch_description(params),
-         {:ok, events} <- fetch_events(params),
-         {:ok, session_id} <- Storage.Dispatch.start_session(identity, DateTime.utc_now()),
-         :ok <- maybe_append(session_id, events) do
-      host_metadata = Hook.invoke(:metadata, conn) || %{}
-      client_metadata = Map.get(params, "metadata", %{})
-
-      merged_metadata =
-        client_metadata
-        |> stringify_keys()
-        |> Map.merge(stringify_keys(host_metadata))
-
-      submit_params = %{
-        "description" => description,
-        "severity" => Map.get(params, "severity") || @default_severity,
-        "metadata" => merged_metadata,
-        "jam_link" => Map.get(params, "jam_link"),
-        "extras" => stringify_keys(Map.get(params, "extras") || %{})
-      }
-
-      case Storage.Dispatch.submit(session_id, submit_params, identity) do
-        {:ok, feedback} ->
-          conn
-          |> put_status(:created)
-          |> json(%{ok: true, id: fetch_id(feedback)})
-
-        {:error, changeset} ->
-          send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
-      end
+    with {:ok, ctx} <-
+           Pipeline.check_actor_rate(ctx,
+             bucket: :report,
+             limit_key: :report_rate_per_minute,
+             default: 10
+           ),
+         {:ok, ctx} <-
+           Pipeline.check_body_size(ctx, limit_key: :max_report_bytes, default: 5_242_880),
+         {:ok, ctx} <- fetch_description(ctx),
+         {:ok, ctx} <- fetch_events(ctx),
+         {:ok, ctx} <- start_synthetic_session(ctx),
+         {:ok, ctx} <- maybe_append_events(ctx),
+         {:ok, ctx} <- submit_feedback(ctx) do
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, id: fetch_id(ctx.feedback)})
     else
-      {:error, :rate_limited, retry_after} ->
-        conn
-        |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(retry_after))
-        |> send_error(429, "rate_limited")
+      {:error, %Error{} = err} -> Pipeline.respond(conn, err)
+    end
+  end
 
-      {:error, :body_too_large} ->
-        send_error(conn, 413, "body_too_large")
+  defp fetch_description(%{params: params} = ctx) do
+    case Map.get(params, "description") do
+      d when is_binary(d) and byte_size(d) > 0 ->
+        {:ok, Map.put(ctx, :description, d)}
 
-      {:error, :missing_description} ->
-        send_error(conn, 422, "missing_description")
+      _ ->
+        {:error, Error.new(422, "missing_description")}
+    end
+  end
 
-      {:error, :events_not_list} ->
-        send_error(conn, 400, "events_must_be_list")
+  defp fetch_events(%{params: params} = ctx) do
+    case Map.get(params, "events", []) do
+      list when is_list(list) -> {:ok, Map.put(ctx, :events, list)}
+      _ -> {:error, Error.new(400, "events_must_be_list")}
+    end
+  end
+
+  defp start_synthetic_session(%{identity: identity} = ctx) do
+    case Storage.Dispatch.start_session(identity, DateTime.utc_now()) do
+      {:ok, session_id} ->
+        {:ok, Map.put(ctx, :session_id, session_id)}
 
       {:error, reason} ->
-        send_error(conn, 500, "report_failed", ChangesetErrors.serialize(reason))
-    end
-  end
-
-  defp fetch_description(params) do
-    case Map.get(params, "description") do
-      d when is_binary(d) and byte_size(d) > 0 -> {:ok, d}
-      _ -> {:error, :missing_description}
-    end
-  end
-
-  defp fetch_events(params) do
-    case Map.get(params, "events", []) do
-      list when is_list(list) -> {:ok, list}
-      _ -> {:error, :events_not_list}
+        {:error,
+         Error.new(500, "report_failed", detail: ChangesetErrors.serialize(reason))}
     end
   end
 
   # Empty events list is valid — text-only Report Now is supported.
-  # Non-empty list is scrubbed and persisted as a single batch.
   # Storage.@callback append_events/3 declares :ok | {:error, term()};
   # we honor that contract exactly (no {:ok, _} fallback).
-  defp maybe_append(_session_id, []), do: :ok
+  defp maybe_append_events(%{events: []} = ctx), do: {:ok, ctx}
 
-  defp maybe_append(session_id, events) when is_list(events) do
+  defp maybe_append_events(%{events: events, session_id: session_id} = ctx) do
     scrubbed = Scrub.scrub_batch(events)
-    Storage.Dispatch.append_events(session_id, 0, scrubbed)
-  end
 
-  defp fetch_id(%{id: id}), do: id
-  defp fetch_id(%{"id" => id}), do: id
-  defp fetch_id(_), do: nil
+    case Storage.Dispatch.append_events(session_id, 0, scrubbed) do
+      :ok ->
+        {:ok, ctx}
 
-  defp stringify_keys(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {to_string(k), v} end)
-  end
-
-  defp stringify_keys(other), do: other
-
-  # Distinct key from EventsController's {:actor, _} bucket so Path A
-  # /report and Path B /events have independent quotas. A user actively
-  # reproducing a bug (Path B) shouldn't burn their /report budget on
-  # event flushes, and vice versa.
-  defp check_actor_rate(identity, limits) do
-    limit = Keyword.get(limits, :report_rate_per_minute, 10)
-    key = {:report, identity[:id] || identity[:kind] || :anonymous}
-    RateLimiter.hit(key, limit, 60)
-  end
-
-  # Mirrors EventsController.check_body_size/2 — content-length-only
-  # check (cheap, runs before body parsing). The key difference is the
-  # config knob: :max_report_bytes (Path A's single-shot bound) vs.
-  # :max_batch_bytes (per-flush bound on /events).
-  defp check_body_size(conn, limits) do
-    max = Keyword.get(limits, :max_report_bytes, 5_242_880)
-
-    case get_req_header(conn, "content-length") do
-      [value] ->
-        case Integer.parse(value) do
-          {n, _} when n <= max -> :ok
-          {_, _} -> {:error, :body_too_large}
-          :error -> :ok
-        end
-
-      _ ->
-        :ok
+      {:error, reason} ->
+        {:error,
+         Error.new(500, "report_failed", detail: ChangesetErrors.serialize(reason))}
     end
   end
 
-  defp send_error(conn, status, code, detail \\ nil) do
-    body = if detail, do: %{error: code, detail: detail}, else: %{error: code}
+  defp submit_feedback(ctx) do
+    %{
+      conn: conn,
+      params: params,
+      identity: identity,
+      session_id: session_id,
+      description: description
+    } = ctx
 
-    conn
-    |> put_status(status)
-    |> json(body)
-    |> halt()
+    host_metadata = Hook.invoke(:metadata, conn) || %{}
+    client_metadata = Map.get(params, "metadata", %{})
+
+    merged_metadata =
+      client_metadata
+      |> stringify_keys()
+      |> Map.merge(stringify_keys(host_metadata))
+
+    submit_params = %{
+      "description" => description,
+      "severity" => Map.get(params, "severity") || @default_severity,
+      "metadata" => merged_metadata,
+      "jam_link" => Map.get(params, "jam_link"),
+      "extras" => stringify_keys(Map.get(params, "extras") || %{})
+    }
+
+    case Storage.Dispatch.submit(session_id, submit_params, identity) do
+      {:ok, feedback} ->
+        {:ok, Map.put(ctx, :feedback, feedback)}
+
+      {:error, changeset} ->
+        {:error,
+         Error.new(422, "submit_failed", detail: ChangesetErrors.serialize(changeset))}
+    end
   end
 end
