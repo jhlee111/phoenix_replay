@@ -117,7 +117,7 @@ Two integration shapes:
 Call `window.PhoenixReplay.openPanel()` from anywhere — a menu item, a
 keyboard shortcut, a trigger element. While recording is idle, the
 panel opens on the Start screen; once recording has started, the
-same `open()` call routes to the submit form.
+same `openPanel()` call routes to the submit form.
 
 ```heex
 <button type="button" data-phoenix-replay-trigger>
@@ -133,7 +133,7 @@ own recording indicator if you want one.
 
 For a custom consent modal or a one-tap workflow, bypass the panel's
 Start screen by calling `window.PhoenixReplay.startRecording()`
-before (or instead of) `open()`. Recording begins without any
+before (or instead of) `openPanel()`. Recording begins without any
 library UI; when you call `stopRecording()`, the panel opens on the
 submit form so the user lands in the library's report flow:
 
