@@ -33,7 +33,7 @@ defmodule PhoenixReplay.Session do
 
   use GenServer, restart: :transient
 
-  alias PhoenixReplay.Config
+  alias PhoenixReplay.{Config, DedupeBuffer}
   alias PhoenixReplay.Storage.Dispatch
 
   @recent_seqs_capacity 50
@@ -229,8 +229,7 @@ defmodule PhoenixReplay.Session do
       last_event_at: now,
       idle_timeout_ms: idle_ms,
       idle_timer: nil,
-      recent_seqs: :queue.new(),
-      recent_seqs_set: MapSet.new(),
+      dedup: DedupeBuffer.new(@recent_seqs_capacity),
       pubsub: Config.pubsub(),
       topic: topic_for(session_id)
     }
@@ -243,7 +242,7 @@ defmodule PhoenixReplay.Session do
   @impl true
   def handle_call({:append, seq, events}, _from, state) do
     cond do
-      MapSet.member?(state.recent_seqs_set, seq) ->
+      DedupeBuffer.member?(state.dedup, seq) ->
         # Silent dedup — controller doesn't need to know.
         {:reply, :ok, schedule_idle(state)}
 
@@ -330,15 +329,7 @@ defmodule PhoenixReplay.Session do
   end
 
   defp remember_seq(state, seq) do
-    queue = :queue.in(seq, state.recent_seqs)
-    set = MapSet.put(state.recent_seqs_set, seq)
-
-    if :queue.len(queue) > @recent_seqs_capacity do
-      {{:value, dropped}, queue2} = :queue.out(queue)
-      %{state | recent_seqs: queue2, recent_seqs_set: MapSet.delete(set, dropped)}
-    else
-      %{state | recent_seqs: queue, recent_seqs_set: set}
-    end
+    %{state | dedup: DedupeBuffer.put(state.dedup, seq)}
   end
 
   defp broadcast(%{pubsub: nil}, _msg), do: :ok
