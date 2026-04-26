@@ -658,7 +658,11 @@
           </section>
 
           <form class="phx-replay-screen phx-replay-screen--form" data-screen="${SCREENS.FORM}">
-            <h2 id="phx-replay-title">Report an issue</h2>
+            <h2 id="phx-replay-title">Describe what happened</h2>
+            <p class="phx-replay-recording-meta" data-phx-replay-recording-meta>
+              <span class="phx-replay-recording-meta-icon" aria-hidden="true">🔴</span>
+              <span class="phx-replay-recording-meta-text">Recording attached</span>
+            </p>
             <label>
               <span>What happened?</span>
               <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
@@ -1301,11 +1305,23 @@
       }
 
       function handleContinue() {
-        // Advance to the describe step (legacy FORM). The mini-player
-        // is destroyed on panel.close (final Send) — the in-modal
-        // screen swap leaves the player around but hidden under the
-        // active screen until close, which is fine since the user only
-        // sees one screen at a time.
+        // Advance to the describe step (legacy FORM). Update the
+        // recording-meta text with the elapsed duration computed from
+        // the active session's start moment (preserved across
+        // stopRecording's partial teardown). Falls back to the static
+        // "Recording attached" if the start time isn't available.
+        const startedAtMs = client._internals.sessionStartedAtMs?.();
+        const metaText = document.querySelector(".phx-replay-recording-meta-text");
+        if (metaText && startedAtMs) {
+          const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+          const m = Math.floor(elapsed / 60);
+          const s = elapsed % 60;
+          metaText.textContent = `Recording attached (${m}:${s.toString().padStart(2, "0")})`;
+        }
+        // The mini-player is destroyed on panel.close (final Send) —
+        // the in-modal screen swap leaves the player around but hidden
+        // under the active screen until close, which is fine since the
+        // user only sees one screen at a time.
         panel.openForm();
       }
 

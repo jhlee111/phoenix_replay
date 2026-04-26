@@ -464,3 +464,24 @@
   font-size: 0.8125rem;
   color: var(--phx-replay-text-muted);
 }
+
+/* Path B describe step — context line that replaces the Path A
+ * banner. Indicates the user has a recording attached and surfaces
+ * its duration so they know what's being sent.
+ */
+.phx-replay-recording-meta {
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  background: var(--phx-replay-surface-muted);
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--phx-replay-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.phx-replay-recording-meta-icon {
+  font-size: 0.625rem;
+}
