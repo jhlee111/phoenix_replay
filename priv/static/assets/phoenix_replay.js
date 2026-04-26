@@ -105,10 +105,10 @@
 
   // Raised when the client tries to resume a session (via the
   // sessionStorage-cached token) but the server responds
-  // `resumed: false` — the previous session is stale. For
-  // `:continuous` the client recovers silently; for `:on_demand`
-  // this surfaces as the panel error screen because losing the
-  // chain violates explicit consent.
+  // `resumed: false` — the previous session is stale. In `:passive`
+  // state the client recovers silently; for Path B (`:active` session
+  // already in progress) this surfaces as the panel error screen
+  // because losing the chain violates explicit consent.
   class PhoenixReplaySessionInterruptedError extends Error {
     constructor() {
       super("Previous recording was interrupted");
@@ -118,8 +118,8 @@
 
   // `sessionStorage` is tab-local, survives reloads + same-tab
   // navigations, gone on tab close. Matches ADR-0002 OQ4's tab-local
-  // on-demand scope — and is the right lifetime for a recording
-  // session that should never bleed between tabs.
+  // session scope — the right lifetime for a recording session that
+  // should never bleed between tabs.
   const STORAGE_KEYS = {
     TOKEN: "phx_replay_token",
     RECORDING: "phx_replay_recording",
@@ -262,9 +262,8 @@
     let recorder = null;
     // ADR-0006 lifecycle states. `:passive` — ring buffer fills locally,
     // no /session, no /events. `:active` — server-flushed session
-    // (today's :continuous behavior, reached via startRecording — Task 4
-    // may add additional entry paths). Default :passive at mount;
-    // transitions:
+    // (reached via startRecording, i.e. Path B entry). Default :passive
+    // at mount; transitions:
     //   :passive -> :active   on startRecording()
     //   :active  -> :passive  on stopRecording() / report() teardown
     let state = "passive";
@@ -285,9 +284,9 @@
     // `seq_watermark`:
     //   - resumed true  → adopt, continue numbering from watermark
     //   - resumed false AND we sent a stored token → stale path
-    //     (ADR-0003 OQ1): continuous silently overwrites; on-demand
-    //     throws `PhoenixReplaySessionInterruptedError` so the panel
-    //     can render the error screen and force re-consent.
+    //     (ADR-0003 OQ1): `:passive` state recovers silently; Path B
+    //     (`:active` session) throws `PhoenixReplaySessionInterruptedError`
+    //     so the panel can render the error screen and force re-consent.
     async function ensureSession() {
       if (sessionToken) return;
       const stored = storageRead(STORAGE_KEYS.TOKEN);
@@ -565,9 +564,10 @@
   // in :float. All three are children of the same `.phx-replay-widget`
   // root so host CSS targets a single scope.
   //
-  // Screens: `idle_start` (only rendered for `:on_demand`), `error`
-  // (session handshake failure), `form` (the description/severity/submit
-  // flow — the only screen used in `:continuous`).
+  // Screens: `idle_start` (Path B entry — starts recording), `error`
+  // (session handshake failure), `choose` (two-path entry panel),
+  // `path_a_form` (Path A direct-submit form), `form` (Path B
+  // post-recording submit form).
   function renderPanel(mountEl, client, cfg) {
     const root = document.createElement("div");
     root.className = "phx-replay-widget";
@@ -764,9 +764,9 @@
       hideModal();
       form.reset();
       status.textContent = "";
-      // Reset to the form screen so a fresh open() without routing shows
-      // the report form (backward-compat for `:continuous`). The init
-      // orchestrator overrides via `openStart` when on-demand + idle.
+      // Reset to the CHOOSE screen so a fresh open() without routing
+      // always starts at the entry panel. The init orchestrator can
+      // override via single-path skip when allow_paths has one entry.
       setScreen(SCREENS.FORM);
       addonCloseCbs.forEach((cb) => {
         try { cb(); } catch (err) { console.warn(`[PhoenixReplay] addon close hook failed: ${err.message}`); }
@@ -890,10 +890,10 @@
     };
   }
 
-  // Status indicator for an active `:on_demand` reproduction in `:float`
-  // mode. The `--phx-replay-pill-*` CSS var family is deliberately
-  // independent of the toggle's so hosts can place them on different
-  // corners without lock-step.
+  // Status indicator visible during an `:active` recording in `:float`
+  // mode (Path B — Record and report). The `--phx-replay-pill-*` CSS
+  // var family is deliberately independent of the toggle's so hosts can
+  // place them on different corners without lock-step.
   function renderPill(widgetRoot, cfg, onStop) {
     const pill = document.createElement("div");
     pill.className = `phx-replay-pill ${positionClass("pill", cfg)}`;
@@ -999,8 +999,8 @@
 
       // Derive UI state from `client.isRecording()` directly — the client
       // is the source of truth. Toggle hide/show is gated on the presence
-      // of a pill so :continuous never blinks the toggle; only :float +
-      // :on_demand swaps toggle ↔ pill in place.
+      // of a pill (`:float` mode only); when in `:active` state the pill
+      // shows and the toggle hides, swapping them back when `:passive`.
       function syncRecordingUI() {
         const recording = client.isRecording();
         if (pill) recording ? pill.show() : pill.hide();
@@ -1120,28 +1120,28 @@
       if (inst) inst.panel.close();
     },
 
-    // Begin rrweb capture on the first mounted instance. No-op if
-    // recording is already active. In `:continuous` mode the recorder
-    // starts at mount, so this is a no-op there — use in `:on_demand`
-    // to begin a reproduction. Returns a promise that rejects on session
+    // Transition to `:active` state on the first mounted instance: opens
+    // a server session and begins flushing the ring buffer. No-op if
+    // already `:active`. Used by Path B (Record and report) and by
+    // `recordAndReport()`. Returns a promise that rejects on session
     // handshake failure; callers can surface that in the UI.
     startRecording() {
       const inst = firstInstance();
       return inst ? inst.startAndSync() : Promise.resolve();
     },
 
-    // Halt rrweb capture and flush the tail of the buffer. In :on_demand
-    // mode this also opens the report form so the user lands in the
-    // submit flow — consistent with the float pill Stop button.
+    // Halt rrweb capture and flush the tail of the buffer. Transitions
+    // to `:passive` state. In `:float` mode this also opens the Path B
+    // submit form — consistent with the pill Stop button.
     stopRecording() {
       const inst = firstInstance();
       return inst ? inst.handleStop() : Promise.resolve();
     },
 
     // Drop the current buffer and session, then restart recording
-    // against a fresh session. No-op if not currently recording. Useful
-    // in `:continuous` when the host wants to discard accumulated noise
-    // and capture only the next window.
+    // against a fresh session. No-op if not currently `:active`. Useful
+    // when the host wants to discard accumulated noise and capture only
+    // the next window.
     resetRecording() {
       const inst = firstInstance();
       return inst ? inst.client.resetRecording() : Promise.resolve();
