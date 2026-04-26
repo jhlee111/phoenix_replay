@@ -246,6 +246,19 @@
     let flushTimer = null;
     let recorder = null;
     let recording = false;
+    // ADR-0006 lifecycle states. `:passive` — ring buffer fills locally,
+    // no /session, no /events. `:active` — server-flushed session
+    // (today's :continuous behavior, now reached only via startRecording
+    // or report-now drain). Default :passive at mount; transitions:
+    //   :passive -> :active   on startRecording()
+    //   :active  -> :passive  on stopRecording() / report() teardown
+    let state = "passive";
+
+    // Begin rrweb capture immediately into the ring buffer. The buffer
+    // is bounded by time + count, so this is safe to leave running for
+    // the lifetime of the page mount. `:passive` means the buffer is
+    // never drained to the server until the user reports.
+    recorder = createRecorder({ buffer });
 
     // Idempotent: a no-op when a session token is already held.
     // On-demand mode leans on this — the session handshake waits
@@ -342,53 +355,48 @@
     }
 
     async function startRecording() {
-      if (recording) return;
+      if (state === "active") return;
       // A prior `stopRecording` left the old token alive so a
       // subsequent `report()` could submit the drained tail. Starting
       // a *new* reproduction abandons that tail and mints fresh.
-      // `ensureSession` will attempt a resume against any stored
-      // token first (ADR-0003); we only null the in-memory token,
-      // not the storage slot.
       sessionToken = null;
       sessionStartedAtMs = null;
       seq = 0;
+      // Drop any buffered passive-state events — the user wants a
+      // clean reproduction starting now (ADR-0006 D1).
+      buffer.drain();
       await ensureSession();
-      recorder = createRecorder({ buffer });
+      state = "active";
       recording = true;
-      // On-demand auto-resume after a page navigation keys off this
-      // flag (autoMount reads it at mount). Continuous ignores it.
       storageWrite(STORAGE_KEYS.RECORDING, "active");
       scheduleFlush();
     }
 
     async function stopRecording() {
-      if (!recording) return;
-      recorder?.stop?.();
-      recorder = null;
+      if (state !== "active") return;
+      // Note: we do NOT call recorder.stop() — rrweb stays running so
+      // the ring buffer keeps filling for any subsequent Report Now.
       recording = false;
+      state = "passive";
       storageClear(STORAGE_KEYS.RECORDING);
-      // Stop the periodic flush before the final drain — otherwise the
-      // timer keeps firing no-op `/events` posts (and occasionally racing
-      // with late rrweb cleanup emissions) after we've torn down.
       cancelFlushTimer();
       await flush();
+      // Drop the session token now that we've drained — the next
+      // startRecording will mint fresh.
+      sessionToken = null;
+      sessionStartedAtMs = null;
+      seq = 0;
+      storageClear(STORAGE_KEYS.TOKEN);
     }
 
     async function resetRecording() {
-      // Per ADR-0002 OQ5: on-demand idle → no-op. Currently recording
-      // (either mode) → stop cleanly, drop buffered events + session,
-      // then start fresh.
-      if (!recording) return;
-      recorder?.stop?.();
-      recorder = null;
+      if (state !== "active") return;
       recording = false;
+      state = "passive";
       buffer.drain();
       sessionToken = null;
       sessionStartedAtMs = null;
       seq = 0;
-      // Drop the continuity token too — reset means "new reproduction",
-      // not "rejoin the old one". `startRecording` will mint a fresh
-      // session via `ensureSession`.
       storageClear(STORAGE_KEYS.TOKEN);
       storageClear(STORAGE_KEYS.RECORDING);
       await startRecording();
@@ -424,27 +432,16 @@
         tokenHeader: cfg.tokenHeader,
       });
 
-      // Tear down the current session. Continuous mode spins up a fresh
-      // one immediately so the next report doesn't share buffer/seq.
-      // On-demand mode returns to idle — the user starts the next
-      // reproduction explicitly.
-      if (recording) {
-        recorder?.stop?.();
-        recorder = null;
-        recording = false;
-      }
+      // Tear down to :passive. The ring buffer keeps filling for any
+      // subsequent Report Now (ADR-0006 — no auto-restart of active).
+      recording = false;
+      state = "passive";
       cancelFlushTimer();
       sessionToken = null;
       sessionStartedAtMs = null;
       seq = 0;
-      // The session is closed server-side after submit; drop both
-      // continuity slots so the next page load starts clean rather
-      // than trying to resume a finished session.
       storageClear(STORAGE_KEYS.TOKEN);
       storageClear(STORAGE_KEYS.RECORDING);
-      if (cfg.recording !== "on_demand") {
-        await startRecording().catch(() => {});
-      }
     }
 
     // Tail flush on page teardown (ADR-0003 Phase 1). `fetch` with
@@ -458,6 +455,7 @@
     // is well clear of that.
     let unloadFired = false;
     function flushOnUnload() {
+      if (state !== "active") return;  // :passive has nothing to ship
       if (unloadFired) return;
       unloadFired = true;
       if (!sessionToken) return;
@@ -903,13 +901,12 @@
       }
       installTriggerListener();
       installUnloadListener();
-      if (!onDemand) {
-        await client.start();
-      } else if (storageRead(STORAGE_KEYS.RECORDING) === "active") {
-        // Cross-navigation resume (ADR-0003 Phase 1). Route through
-        // the panel orchestrator so a stale/interrupted session
-        // surfaces in the error screen instead of silently failing.
-        // Successful resume silently re-shows the pill.
+      // ADR-0006: no auto-start of :active on mount. The widget begins
+      // in :passive — rrweb is running, ring buffer is filling, but
+      // nothing reaches the server until the user reports. The
+      // session-continuity auto-resume (ADR-0003) only re-engages when
+      // a prior :active session was in flight before navigation.
+      if (storageRead(STORAGE_KEYS.RECORDING) === "active") {
         handleStartFromPanel();
       }
       return client;
