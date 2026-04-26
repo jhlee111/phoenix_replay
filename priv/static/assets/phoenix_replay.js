@@ -453,6 +453,30 @@
       transitionToPassive();
     }
 
+    // Path A submit (ADR-0006). Drains the ring buffer client-side and
+    // POSTs everything in one shot to /report. No /session handshake;
+    // no /events flush; no state transition (we stay :passive).
+    // The recorder keeps running so the buffer immediately starts
+    // refilling for any subsequent Report Now.
+    async function reportNow({ description, severity, metadata = {}, jamLink = null, extras = {} }) {
+      const events = buffer.drain();
+
+      const result = await postJson(`${basePath}${cfg.reportPath}`, {
+        description,
+        severity: severity || cfg.defaultSeverity,
+        events,
+        metadata,
+        jam_link: jamLink,
+        extras,
+      }, {
+        csrfToken,
+        csrfHeader: cfg.csrfHeader,
+        // No sessionToken on /report — endpoint mints its own session.
+      });
+
+      return result;
+    }
+
     // Tail flush on page teardown (ADR-0003 Phase 1). `fetch` with
     // `keepalive: true` is the one transport that survives navigation
     // — `fetch(..., { keepalive: false })` is cancelled by the browser
@@ -506,6 +530,7 @@
     return {
       start,
       report,
+      reportNow,
       flush,
       flushOnUnload,
       startRecording,
@@ -603,6 +628,29 @@
             </div>
             <div class="phx-replay-status" aria-live="polite"></div>
           </form>
+
+          <form class="phx-replay-screen phx-replay-screen--path-a-form" data-screen="${SCREENS.PATH_A_FORM}" hidden>
+            <h2>Report now</h2>
+            <p class="phx-replay-path-a-banner">
+              <span class="phx-replay-path-a-banner-icon" aria-hidden="true">📨</span>
+              The most recent activity from this page will be attached to your report.
+            </p>
+            <label>
+              <span>What happened?</span>
+              <textarea name="description" rows="4" required placeholder="Steps to reproduce, what you expected, what actually happened"></textarea>
+            </label>
+            <label class="phx-replay-severity-field" hidden>
+              <span>Severity</span>
+              <select name="severity">
+                ${cfg.severities.map(s => `<option value="${s}"${s === cfg.defaultSeverity ? " selected" : ""}>${s}</option>`).join("")}
+              </select>
+            </label>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+              <button type="submit" class="phx-replay-submit">Send</button>
+            </div>
+            <div class="phx-replay-status" aria-live="polite"></div>
+          </form>
         </div>
       </div>
     `;
@@ -620,6 +668,7 @@
     let onRetryClick = () => {};
     let onChooseReportNowClick = () => {};
     let onChooseRecordClick = () => {};
+    let onPathASubmitHandler = async (data) => { throw new Error("Path A submit handler not wired"); };
 
     function setScreen(name) {
       screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
@@ -636,6 +685,7 @@
       showModal();
     }
     function openChoose() { setScreen(SCREENS.CHOOSE); showModal(); }
+    function openPathAForm() { setScreen(SCREENS.PATH_A_FORM); showModal(); }
 
     // Mount panel addons against their slots. Each addon's mount(ctx)
     // returns optional { beforeSubmit, onPanelClose } hooks; we collect
@@ -747,17 +797,35 @@
       }
     });
 
+    const pathAForm = root.querySelector(".phx-replay-screen--path-a-form");
+    const pathAStatus = pathAForm.querySelector(".phx-replay-status");
+
+    pathAForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = new FormData(pathAForm);
+      pathAStatus.textContent = "Sending…";
+      try {
+        await onPathASubmitHandler(data);
+        pathAStatus.textContent = "Thanks! Your report was submitted.";
+        setTimeout(close, 1200);
+      } catch (err) {
+        pathAStatus.textContent = `Submit failed: ${err.message}`;
+      }
+    });
+
     return {
       root,
       openForm,
       openStart,
       openError,
       openChoose,
+      openPathAForm,
       close,
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
       onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
       onChooseRecord: (fn) => { onChooseRecordClick = fn; },
+      onPathASubmit: (fn) => { onPathASubmitHandler = fn; },
     };
   }
 
@@ -930,6 +998,13 @@
       panel.onRetry(handleStartFromPanel);
       panel.onChooseReportNow(() => panel.openPathAForm());
       panel.onChooseRecord(() => handleStartFromPanel());
+      panel.onPathASubmit(async (formData) => {
+        await client.reportNow({
+          description: formData.get("description"),
+          severity: formData.get("severity") || undefined,
+          jamLink: formData.get("jam_link") || null,
+        });
+      });
 
       instances.set(cfg.mount, {
         panel,

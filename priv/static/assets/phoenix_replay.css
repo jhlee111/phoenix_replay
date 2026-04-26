@@ -340,3 +340,25 @@
   color: var(--phx-replay-text-muted);
   line-height: 1.4;
 }
+
+/* Path A submit form banner — informs the user that recent activity
+ * will be attached. Visual weight is intentionally muted: the banner
+ * is context, not a CTA.
+ */
+.phx-replay-path-a-banner {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  background: var(--phx-replay-surface-muted);
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--phx-replay-text-muted);
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phx-replay-path-a-banner-icon {
+  flex: 0 0 auto;
+}
