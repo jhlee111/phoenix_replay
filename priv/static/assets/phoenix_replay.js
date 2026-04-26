@@ -996,6 +996,39 @@
       return promise;
     }
 
+    // Inline-error region helpers. The markup added in Task 1 places a
+    // [data-slot-error="<slotName>"] element near each lifecycle slot;
+    // these helpers drive its visibility from canStart hook results
+    // (Task 4) and other addon-side preflight failures.
+    function showInlineError(slotName, msg) {
+      const region = root.querySelector(`[data-slot-error='${slotName}']`);
+      if (!region) return;
+      region.textContent = msg;
+      region.hidden = false;
+    }
+
+    function clearInlineError(slotName) {
+      if (slotName) {
+        const region = root.querySelector(`[data-slot-error='${slotName}']`);
+        if (region) { region.textContent = ""; region.hidden = true; }
+        return;
+      }
+      root.querySelectorAll("[data-slot-error]").forEach((r) => {
+        r.textContent = "";
+        r.hidden = true;
+      });
+    }
+
+    function disableStart() {
+      const btn = root.querySelector(".phx-replay-start-cta");
+      if (btn) btn.disabled = true;
+    }
+
+    function enableStart() {
+      const btn = root.querySelector(".phx-replay-start-cta");
+      if (btn) btn.disabled = false;
+    }
+
     // form-top is panel-scoped: mount once at construction. Each
     // form-top slot element (legacy form + Path A form both have one)
     // gets the same set of addons mounted against it — addons that
@@ -1126,6 +1159,10 @@
       close,
       mountSlot: (slotName, slotEl) => mountAddonsForSlot(slotName, slotEl),
       unmountSlot: (slotName) => unmountAddonsForSlot(slotName),
+      showInlineError,
+      clearInlineError,
+      disableStart,
+      enableStart,
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
       onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
