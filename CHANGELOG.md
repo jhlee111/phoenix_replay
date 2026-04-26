@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0006 Phase 4 — drop `modes:` shim + `open()` alias (2026-04-26)
+
+Removes the two transitional symbols the unified-entry rollout left
+behind. Both are replaced with throwing stubs that name the canonical
+replacement, so any out-of-tree consumer hitting them gets a clear,
+actionable error instead of silent semantic drift.
+
+- **`window.PhoenixReplay.open()` removed.** The deprecated alias
+  for `openPanel()` (introduced as backwards-compat in Phase 2,
+  documented as deprecated in Phase 3) now throws:
+  `window.PhoenixReplay.open() was removed in ADR-0006 Phase 4. Use
+  window.PhoenixReplay.openPanel() instead.` Hosts that ran the
+  Phase 3 migration are unaffected. The
+  `[data-phoenix-replay-trigger]` delegated listener routes through
+  the internal `routedOpen()` directly and continues to work
+  unchanged.
+- **`registerPanelAddon({modes: [...]})` removed.** The legacy
+  recording-mode filter from the 2026-04-25 mode-aware-addons spec
+  (mapped via a one-phase shim to `paths:` symbols) now throws:
+  `the modes: filter was removed in ADR-0006 Phase 4. Use paths:
+  ["report_now" | "record_and_report"] instead.` Throwing — rather
+  than silently accepting and falling through to mount-on-every-path
+  — was deliberate: the silent fallthrough would mount Path B addons
+  on Path A widgets too, which is a worse failure than a loud
+  rejection.
+
+**Migration:**
+
+```js
+// Before (Phase 2/3)
+window.PhoenixReplay.open();
+PhoenixReplay.registerPanelAddon({
+  id: "audio",
+  modes: ["on_demand"],
+  mount: (ctx) => { /* ... */ },
+});
+
+// After (Phase 4)
+window.PhoenixReplay.openPanel();
+PhoenixReplay.registerPanelAddon({
+  id: "audio",
+  paths: ["record_and_report"],
+  mount: (ctx) => { /* ... */ },
+});
+```
+
+The README and the headless-integration / on-demand-recording guides
+were updated in this same release to use the canonical names. The
+ash_feedback companion library's audio addon migrated to `paths:` in
+its 2026-04-25 Phase 3 release, so no action is required for hosts
+who use ash_feedback as their addon.
+
+This closes ADR-0006. The unified feedback entry surface (Phases
+1 + 2 + 2b + 3 + 4) is the new baseline.
+
 ### ADR-0006 Phase 2b — `/report` hardening (2026-04-26)
 
 Closes the four production-blocker follow-ups deferred from Phase 1
