@@ -214,25 +214,67 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(data-mode="headless")
     end
 
-    test "recording defaults to continuous" do
+    test "show_severity defaults to false" do
       html =
         render_component(&phoenix_replay_widget/1,
           base_path: "/x",
           csrf_token: "x"
         )
 
-      assert html =~ ~s(data-recording="continuous")
+      assert html =~ ~s(data-show-severity="false")
     end
 
-    test "recording={:on_demand} flows to data-recording attr" do
+    test "show_severity={true} flows to data-show-severity attr" do
       html =
         render_component(&phoenix_replay_widget/1,
           base_path: "/x",
           csrf_token: "x",
-          recording: :on_demand
+          show_severity: true
         )
 
-      assert html =~ ~s(data-recording="on_demand")
+      assert html =~ ~s(data-show-severity="true")
+    end
+
+    test "allow_paths defaults to both paths CSV" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-allow-paths="report_now,record_and_report")
+    end
+
+    test "allow_paths can be restricted to a single path" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          allow_paths: [:report_now]
+        )
+
+      assert html =~ ~s(data-allow-paths="report_now")
+    end
+
+    test "buffer_window_seconds defaults to 60" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-buffer-window-seconds="60")
+    end
+
+    test "buffer_window_seconds is host-tunable" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/x",
+          csrf_token: "x",
+          buffer_window_seconds: 120
+        )
+
+      assert html =~ ~s(data-buffer-window-seconds="120")
     end
 
     test "asset_path={nil} suppresses stylesheet and script tags" do

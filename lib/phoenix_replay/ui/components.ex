@@ -75,21 +75,32 @@ defmodule PhoenixReplay.UI.Components do
         "`[data-phoenix-replay-trigger]` on any element or by calling " <>
         "`window.PhoenixReplay.open()` / `.close()`."
 
-  attr :recording, :atom,
-    default: :continuous,
-    values: [:continuous, :on_demand],
+  attr :show_severity, :boolean,
+    default: false,
     doc:
-      "`:continuous` (default) starts rrweb capture at widget mount and " <>
-        "flushes buffered events on submit — retroactive \"I already saw " <>
-        "the bug\" reports work. `:on_demand` keeps the recorder idle " <>
-        "until the user clicks Start in the panel (float mode) or the " <>
-        "host calls `window.PhoenixReplay.startRecording()` (headless). " <>
-        "In `:float` + `:on_demand`, toggle clicks open a Start CTA; " <>
-        "clicking Start swaps the toggle for a recording pill with a " <>
-        "Stop button, and clicking Stop opens the submit form. " <>
-        "Use `:on_demand` when explicit per-session consent or lower " <>
-        "runtime cost matters. See ADR-0002 and the " <>
-        "[On-demand recording guide](guides/on-demand-recording.html)."
+      "When `true`, the submit forms (Path A and Path B) render Low/Medium/" <>
+        "High severity buttons. When `false` (default), severity is omitted " <>
+        "and the submitted Feedback row carries `severity: nil`. End-user " <>
+        "widgets should leave this off — severity is a triage decision the " <>
+        "receiver makes. Set `true` for QA-internal portals where the " <>
+        "reporter is also the triager."
+
+  attr :allow_paths, :list,
+    default: [:report_now, :record_and_report],
+    doc:
+      "Which Report Issue paths the panel offers. Defaults to both. Pass " <>
+        "`[:report_now]` to hide the Record-and-report card; pass " <>
+        "`[:record_and_report]` to hide Report-now. When only one is " <>
+        "allowed, clicking the trigger goes straight to that path's UI " <>
+        "(no two-option panel)."
+
+  attr :buffer_window_seconds, :integer,
+    default: 60,
+    doc:
+      "Sliding-window size of the client-side ring buffer (seconds) used " <>
+        "by Path A. Older events are evicted as they fall out of the " <>
+        "window. Tune lower for memory-sensitive hosts; tune higher when " <>
+        "users typically take longer to recognize and report a bug."
 
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
@@ -173,7 +184,9 @@ defmodule PhoenixReplay.UI.Components do
       data-widget-text={@widget_text}
       data-position={@position}
       data-mode={@mode}
-      data-recording={@recording}
+      data-show-severity={to_string(@show_severity)}
+      data-allow-paths={Enum.map_join(@allow_paths, ",", &Atom.to_string/1)}
+      data-buffer-window-seconds={@buffer_window_seconds}
       {@rest}
     />
     """
