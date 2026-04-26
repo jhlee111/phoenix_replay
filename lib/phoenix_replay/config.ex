@@ -35,6 +35,10 @@ defmodule PhoenixReplay.Config do
         * `:batch_rate_per_minute` (default: 30 per session)
         * `:actor_rate_per_minute` (default: 300 per actor)
         * `:session_ttl_seconds` (default: 1800)
+        * `:max_report_bytes` (default: 5 MB) — body cap on POST /report
+          (Path A single-shot upload). Rejects with 413 before parsing.
+        * `:report_rate_per_minute` (default: 10 per actor) — submission
+          rate cap on POST /report. Returns 429 with retry-after.
 
     * `:session_token_secret` — required. Used by
       `PhoenixReplay.SessionToken` to sign session tokens. Keep in an

@@ -17,15 +17,18 @@ defmodule PhoenixReplay.ReportController do
 
   use Phoenix.Controller, formats: [:json]
 
-  alias PhoenixReplay.{ChangesetErrors, Hook, Scrub, Storage}
+  alias PhoenixReplay.{ChangesetErrors, Config, Hook, Scrub, Storage}
   alias PhoenixReplay.Plug.Identify
 
+  @default_limits [max_report_bytes: 5_242_880]
   @default_severity "medium"
 
   def create(conn, params) do
     identity = Identify.fetch(conn) || %{kind: :anonymous}
+    limits = Keyword.merge(@default_limits, Config.limits())
 
-    with {:ok, description} <- fetch_description(params),
+    with :ok <- check_body_size(conn, limits),
+         {:ok, description} <- fetch_description(params),
          {:ok, events} <- fetch_events(params),
          {:ok, session_id} <- Storage.Dispatch.start_session(identity, DateTime.utc_now()),
          :ok <- maybe_append(session_id, events) do
@@ -55,6 +58,9 @@ defmodule PhoenixReplay.ReportController do
           send_error(conn, 422, "submit_failed", ChangesetErrors.serialize(changeset))
       end
     else
+      {:error, :body_too_large} ->
+        send_error(conn, 413, "body_too_large")
+
       {:error, :missing_description} ->
         send_error(conn, 422, "missing_description")
 
@@ -100,6 +106,26 @@ defmodule PhoenixReplay.ReportController do
   end
 
   defp stringify_keys(other), do: other
+
+  # Mirrors EventsController.check_body_size/2 — content-length-only
+  # check (cheap, runs before body parsing). The key difference is the
+  # config knob: :max_report_bytes (Path A's single-shot bound) vs.
+  # :max_batch_bytes (per-flush bound on /events).
+  defp check_body_size(conn, limits) do
+    max = Keyword.get(limits, :max_report_bytes, 5_242_880)
+
+    case get_req_header(conn, "content-length") do
+      [value] ->
+        case Integer.parse(value) do
+          {n, _} when n <= max -> :ok
+          {_, _} -> {:error, :body_too_large}
+          :error -> :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp send_error(conn, status, code, detail \\ nil) do
     body = if detail, do: %{error: code, detail: detail}, else: %{error: code}

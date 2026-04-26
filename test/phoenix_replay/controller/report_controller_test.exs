@@ -110,6 +110,51 @@ defmodule PhoenixReplay.ReportControllerTest do
       assert %{"error" => "events_must_be_list"} = json_response(conn, 400)
     end
 
+    test "413 when content-length exceeds max_report_bytes", %{conn: conn} do
+      prior_limits = Application.get_env(:phoenix_replay, :limits)
+      Application.put_env(:phoenix_replay, :limits, max_report_bytes: 1024)
+
+      on_exit(fn ->
+        case prior_limits do
+          nil -> Application.delete_env(:phoenix_replay, :limits)
+          v -> Application.put_env(:phoenix_replay, :limits, v)
+        end
+      end)
+
+      oversized_conn =
+        conn
+        |> put_req_header("content-length", "2048")
+
+      oversized_conn =
+        PhoenixReplay.ReportController.create(oversized_conn, %{
+          "description" => "would-be too big",
+          "events" => []
+        })
+
+      assert oversized_conn.status == 413
+      assert %{"error" => "body_too_large"} = json_response(oversized_conn, 413)
+    end
+
+    test "happy path passes when content-length is under the cap", %{conn: conn} do
+      prior_limits = Application.get_env(:phoenix_replay, :limits)
+      Application.put_env(:phoenix_replay, :limits, max_report_bytes: 1_000_000)
+
+      on_exit(fn ->
+        case prior_limits do
+          nil -> Application.delete_env(:phoenix_replay, :limits)
+          v -> Application.put_env(:phoenix_replay, :limits, v)
+        end
+      end)
+
+      small_conn =
+        conn
+        |> put_req_header("content-length", "256")
+
+      small_conn = PhoenixReplay.ReportController.create(small_conn, %{"description" => "tiny"})
+
+      assert small_conn.status == 201
+    end
+
     test "422 detail is a serialized error map, not a stringified changeset", %{conn: conn} do
       start_supervised!({PhoenixReplay.Test.FailingStorage, []})
       Application.put_env(:phoenix_replay, :storage, {PhoenixReplay.Test.FailingStorage, []})
