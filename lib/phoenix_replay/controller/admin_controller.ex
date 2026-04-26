@@ -58,9 +58,14 @@ defmodule PhoenixReplay.AdminController do
   end
 
   defp coerce_filters(params) do
-    params
-    |> Map.take(["severity"])
-    |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
+    # Literal-keyed extraction. Avoids `String.to_existing_atom/1` on
+    # user-supplied keys (Dynamic atom creation anti-pattern). Adding a
+    # new filter is one new clause, not a whitelist + atom-conversion
+    # pair to keep in sync.
+    case params["severity"] do
+      s when is_binary(s) -> %{severity: s}
+      _ -> %{}
+    end
   end
 
   defp parse_int(nil), do: nil
