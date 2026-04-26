@@ -386,3 +386,70 @@
 .phx-replay-pill-action-slot:empty {
   display: none;
 }
+
+/* Path B review step — post-recording preview before the user types
+ * a description. Mini rrweb-player + a media slot for addons (e.g.,
+ * audio playback). Re-record discards the events and starts fresh;
+ * Continue advances to the describe step (legacy FORM screen).
+ */
+.phx-replay-review-player {
+  width: 100%;
+  height: 16rem;
+  border: 1px solid var(--phx-replay-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--phx-replay-surface-muted);
+}
+
+.phx-replay-review-player:empty::before {
+  content: "Loading playback…";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 0.8125rem;
+  color: var(--phx-replay-text-muted);
+}
+
+.phx-replay-rerecord {
+  background: var(--phx-replay-surface-muted);
+  color: var(--phx-replay-text);
+  border-color: var(--phx-replay-border);
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.phx-replay-rerecord:hover {
+  background: var(--phx-replay-surface);
+  border-color: var(--phx-replay-primary);
+}
+
+.phx-replay-continue {
+  background: var(--phx-replay-primary);
+  color: #fff;
+  border-color: var(--phx-replay-primary);
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.phx-replay-continue:hover {
+  background: var(--phx-replay-primary-hover);
+}
+
+/* Mini-player rrweb-player sizing override — rrweb-player's UMD bundle
+ * applies its own width/height; force the wrapper to constrain inside
+ * the modal (max-height clamp prevents oversized recordings from
+ * blowing the panel out). */
+.phx-replay-review-player .replayer-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 16rem;
+}

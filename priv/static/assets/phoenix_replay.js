@@ -52,8 +52,9 @@
     CHOOSE: "choose",
     IDLE_START: "idle_start",
     ERROR: "error",
-    FORM: "form",                  // Path B describe step (legacy name preserved)
-    PATH_A_FORM: "path_a_form",    // Path A single-step submit (markup added in Task 5)
+    FORM: "form",                 // Path B describe step (post-review)
+    PATH_A_FORM: "path_a_form",   // Path A single-step submit
+    REVIEW: "review",             // Path B post-recording review (mini-player + Re-record + Continue)
   };
 
   // Panel addon registry. Each entry: { id, slot, mount, modes }. `mount(ctx)`
@@ -644,6 +645,18 @@
             </div>
           </section>
 
+          <section class="phx-replay-screen phx-replay-screen--review" data-screen="${SCREENS.REVIEW}" hidden>
+            <h2>Review your recording</h2>
+            <p class="phx-replay-screen-lede">Preview the playback below; Continue to add a description, or Re-record to start over.</p>
+            <div class="phx-replay-review-player" data-phx-replay-mini-player></div>
+            <div class="phx-replay-panel-addons" data-slot="review-media"></div>
+            <div class="phx-replay-actions">
+              <button type="button" class="phx-replay-cancel">Cancel</button>
+              <button type="button" class="phx-replay-rerecord">Re-record</button>
+              <button type="button" class="phx-replay-continue">Continue</button>
+            </div>
+          </section>
+
           <form class="phx-replay-screen phx-replay-screen--form" data-screen="${SCREENS.FORM}">
             <h2 id="phx-replay-title">Report an issue</h2>
             <label>
@@ -717,6 +730,8 @@
     let onRetryClick = () => {};
     let onChooseReportNowClick = () => {};
     let onChooseRecordClick = () => {};
+    let onReRecordClick = () => {};
+    let onContinueClick = () => {};
     let onPathASubmitHandler = async (data) => { throw new Error("Path A submit handler not wired"); };
 
     function setScreen(name) {
@@ -735,6 +750,7 @@
     }
     function openChoose() { setScreen(SCREENS.CHOOSE); showModal(); }
     function openPathAForm() { setScreen(SCREENS.PATH_A_FORM); showModal(); }
+    function openReview() { setScreen(SCREENS.REVIEW); showModal(); }
 
     // Mount panel addons against their slots. Each addon's mount(ctx)
     // returns optional { beforeSubmit, onPanelClose } hooks; we collect
@@ -807,6 +823,8 @@
     root.querySelector(".phx-replay-retry").addEventListener("click", () => onRetryClick());
     root.querySelector(".phx-replay-choose-report-now").addEventListener("click", () => onChooseReportNowClick());
     root.querySelector(".phx-replay-choose-record").addEventListener("click", () => onChooseRecordClick());
+    root.querySelector(".phx-replay-rerecord").addEventListener("click", () => onReRecordClick());
+    root.querySelector(".phx-replay-continue").addEventListener("click", () => onContinueClick());
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -891,11 +909,14 @@
       openError,
       openChoose,
       openPathAForm,
+      openReview,
       close,
       onStart: (fn) => { onStartClick = fn; },
       onRetry: (fn) => { onRetryClick = fn; },
       onChooseReportNow: (fn) => { onChooseReportNowClick = fn; },
       onChooseRecord: (fn) => { onChooseRecordClick = fn; },
+      onReRecord: (fn) => { onReRecordClick = fn; },
+      onContinue: (fn) => { onContinueClick = fn; },
       onPathASubmit: (fn) => { onPathASubmitHandler = fn; },
     };
   }
