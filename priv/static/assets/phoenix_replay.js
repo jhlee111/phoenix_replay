@@ -89,7 +89,16 @@
 
     const res = await fetch(url, { method: "POST", headers, body: bodyToSend, credentials: "same-origin" });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
+      let text = await res.text().catch(() => "");
+      // Phoenix dev-server compile errors return a full HTML page;
+      // dumping the whole body into the panel's error screen turns the
+      // modal into an unreadable blob. Extract <title> when the body
+      // looks like HTML so the user sees a concise reason ("CompileError",
+      // "Internal Server Error", etc.) and falls back to statusText.
+      if (text && text.trim().charAt(0) === "<") {
+        const titleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        text = titleMatch ? titleMatch[1].trim() : "";
+      }
       throw new PhoenixReplayError(res.status, text || res.statusText);
     }
     return res.headers.get("content-type")?.includes("application/json")
