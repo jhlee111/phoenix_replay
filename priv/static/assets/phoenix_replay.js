@@ -602,6 +602,32 @@
     };
   }
 
+  // ---- panel helpers -----------------------------------------------------
+
+  // Iterate a slot's cleanup map and return a Promise that resolves when
+  // every cleanup has settled. Sync cleanups run inline; thrown errors are
+  // logged but never abort siblings. Cleanups that return a thenable
+  // (Promise) are collected and awaited via Promise.all.
+  //
+  // Rationale: addons like the audio recorder finalize state inside an
+  // event-driven async callback (recorder.onstop). The framework needs to
+  // await that flush before the next slot mounts (e.g., handleStop →
+  // openReview → review-media). Existing sync addons fall through the
+  // empty Promise.all path and resolve immediately.
+  function collectCleanupResults(stateMap) {
+    const promises = [];
+    stateMap.forEach((cleanup, id) => {
+      if (typeof cleanup !== "function") return;
+      try {
+        const result = cleanup();
+        if (result && typeof result.then === "function") promises.push(result);
+      } catch (err) {
+        console.warn(`[PhoenixReplay] addon "${id}" cleanup failed: ${err.message}`);
+      }
+    });
+    return promises.length ? Promise.all(promises).then(() => {}) : Promise.resolve();
+  }
+
   // ---- widget UI ---------------------------------------------------------
 
   // The panel (modal + multi-screen body) is created in both :float and
@@ -964,15 +990,10 @@
 
     function unmountAddonsForSlot(slotName) {
       const state = slotState.get(slotName);
-      if (!state) return;
-      state.forEach((cleanup, id) => {
-        if (typeof cleanup === "function") {
-          try { cleanup(); } catch (err) {
-            console.warn(`[PhoenixReplay] addon "${id}" cleanup failed for slot "${slotName}": ${err.message}`);
-          }
-        }
-      });
+      if (!state) return Promise.resolve();
+      const promise = collectCleanupResults(state);
       state.clear();
+      return promise;
     }
 
     // form-top is panel-scoped: mount once at construction. Each
@@ -1565,7 +1586,7 @@
 
   // Internal factory exposed only for tests. Do not use from host code —
   // the surface may change without a CHANGELOG entry.
-  PhoenixReplay._testInternals = { createRingBuffer };
+  PhoenixReplay._testInternals = { createRingBuffer, collectCleanupResults };
 
   if (typeof global !== "undefined") global.PhoenixReplay = PhoenixReplay;
   if (typeof document !== "undefined") {
