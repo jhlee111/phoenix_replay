@@ -245,11 +245,11 @@
     let seq = 0;
     let flushTimer = null;
     let recorder = null;
-    let recording = false;
     // ADR-0006 lifecycle states. `:passive` — ring buffer fills locally,
     // no /session, no /events. `:active` — server-flushed session
-    // (today's :continuous behavior, now reached only via startRecording
-    // or report-now drain). Default :passive at mount; transitions:
+    // (today's :continuous behavior, reached via startRecording — Task 4
+    // may add additional entry paths). Default :passive at mount;
+    // transitions:
     //   :passive -> :active   on startRecording()
     //   :active  -> :passive  on stopRecording() / report() teardown
     let state = "passive";
@@ -307,7 +307,7 @@
     }
 
     async function flush() {
-      if (!sessionToken) return;
+      if (state !== "active") return;
       const events = buffer.drain();
       if (events.length === 0) return;
 
@@ -354,6 +354,19 @@
       flushTimer = null;
     }
 
+    // Centralize the :passive teardown so future audits ("does every
+    // teardown null the token?") are trivial — all three call sites
+    // share this helper.
+    function transitionToPassive() {
+      cancelFlushTimer();
+      state = "passive";
+      sessionToken = null;
+      sessionStartedAtMs = null;
+      seq = 0;
+      storageClear(STORAGE_KEYS.TOKEN);
+      storageClear(STORAGE_KEYS.RECORDING);
+    }
+
     async function startRecording() {
       if (state === "active") return;
       // A prior `stopRecording` left the old token alive so a
@@ -367,7 +380,6 @@
       buffer.drain();
       await ensureSession();
       state = "active";
-      recording = true;
       storageWrite(STORAGE_KEYS.RECORDING, "active");
       scheduleFlush();
     }
@@ -376,34 +388,21 @@
       if (state !== "active") return;
       // Note: we do NOT call recorder.stop() — rrweb stays running so
       // the ring buffer keeps filling for any subsequent Report Now.
-      recording = false;
-      state = "passive";
-      storageClear(STORAGE_KEYS.RECORDING);
       cancelFlushTimer();
-      await flush();
-      // Drop the session token now that we've drained — the next
-      // startRecording will mint fresh.
-      sessionToken = null;
-      sessionStartedAtMs = null;
-      seq = 0;
-      storageClear(STORAGE_KEYS.TOKEN);
+      await flush();           // still in :active — flush() will run
+      transitionToPassive();
     }
 
     async function resetRecording() {
-      if (state !== "active") return;
-      recording = false;
-      state = "passive";
+      const wasActive = state === "active";
+      // Discard any captured context regardless of state.
       buffer.drain();
-      sessionToken = null;
-      sessionStartedAtMs = null;
-      seq = 0;
-      storageClear(STORAGE_KEYS.TOKEN);
-      storageClear(STORAGE_KEYS.RECORDING);
-      await startRecording();
+      transitionToPassive();
+      if (wasActive) await startRecording();
     }
 
     function isRecording() {
-      return recording;
+      return state === "active";
     }
 
     // Legacy public: unchanged shape. `start()` used to combine session
@@ -415,8 +414,10 @@
     }
 
     async function report({ description, severity, metadata = {}, jamLink = null, extras = {} }) {
-      // Flush any buffered events first so the submit record captures the
-      // full tail of the session.
+      // Flush any buffered events first so the submit record captures
+      // the full tail of the session. Must be :active for flush() to do
+      // anything; if a passive widget calls report(), it's a host bug —
+      // the new POST /report path (Task 4) is for passive ingest.
       await flush();
 
       await postJson(`${basePath}${cfg.submitPath}`, {
@@ -434,14 +435,7 @@
 
       // Tear down to :passive. The ring buffer keeps filling for any
       // subsequent Report Now (ADR-0006 — no auto-restart of active).
-      recording = false;
-      state = "passive";
-      cancelFlushTimer();
-      sessionToken = null;
-      sessionStartedAtMs = null;
-      seq = 0;
-      storageClear(STORAGE_KEYS.TOKEN);
-      storageClear(STORAGE_KEYS.RECORDING);
+      transitionToPassive();
     }
 
     // Tail flush on page teardown (ADR-0003 Phase 1). `fetch` with
