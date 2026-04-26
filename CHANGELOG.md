@@ -22,6 +22,86 @@ Smoke verified in Chrome on the ash_feedback_demo continuous + on-demand-float +
 on-demand-headless pages — see Phase 1.5 smoke matrix in
 `docs/superpowers/plans/2026-04-25-mode-aware-panel-addons.md`.
 
+### ADR-0006 Phase 3 — Pill slot + Review step + Slot lifecycle (2026-04-25)
+
+The recording pill grows a `data-slot="pill-action"` div between the
+time display and the Stop button. Addons that target Path B's
+in-flight UX (audio mic toggle being the first consumer in the
+ash_feedback companion phase) mount here when the pill appears and
+unmount when it disappears.
+
+A new `SCREENS.REVIEW` screen sits between Stop and the legacy
+describe form. It embeds a client-side mini rrweb-player fed from
+`client.takeReviewEvents()` (events accumulated during `:active`
+flushes — no new server endpoint) and a `data-slot="review-media"`
+div for media-playback addons. Re-record discards the events and
+starts a fresh session; Continue advances to the describe step.
+
+The legacy `SCREENS.FORM` is now Path B's describe step. Heading
+shifts from "Report an issue" to "Describe what happened" with a
+recording-meta line ("Recording attached (0:24)") replacing the
+Path A banner.
+
+`registerPanelAddon` accepts a new `paths:` filter — a list of
+user-facing path symbols (`"report_now"`, `"record_and_report"`).
+The legacy `modes:` filter is retained for one more phase via the
+shim from Phase 2 to give the ash_feedback audio addon time to
+migrate; Phase 4 drops it.
+
+Slot lifecycle: an addon's `mount(ctx)` may return:
+- a function — called when the slot's host DOM goes dead (slot
+  hidden, panel closed for panel-scoped slots, pill hidden for
+  pill-action). New canonical contract.
+- `{beforeSubmit, onPanelClose}` — legacy shape, still works for
+  Phase 2 addons until they migrate.
+- nothing — legacy "fire-and-forget" mount.
+
+Slot ownership for unmount:
+- `form-top` is panel-scoped (legacy semantics; cleanup via the
+  existing `addonCloseCbs` path).
+- `pill-action` is pill-scoped (lives in `widgetRoot` outside the
+  modal; lifecycle owned exclusively by `syncRecordingUI`,
+  unaffected by `panel.close`).
+- `review-media` is panel-scoped (lives inside the modal's REVIEW
+  screen; unmounts on screen leave OR panel close).
+
+Widget component gains `rrweb_player_src` + `rrweb_player_style_src`
+attrs whose script/stylesheet tags emit only when `allow_paths`
+includes `:record_and_report`. Path A-only widgets save a network
+roundtrip.
+
+Pill exposes `slotEl` for the lifecycle wiring and a 1Hz recording
+time display computed from the active session's `sessionStartedAtMs`.
+The pill label loses the trailing ellipsis ("Recording…" → "Recording")
+because the time display following it serves the indicator role.
+
+`createRingBuffer` is unchanged from Phase 2 (still has `snapshot()`
++ `drain()`). The Phase 3 review-events mirror lives at the client
+level (`reviewEvents` array in `createClient`), separate from the
+ring buffer's window-bounded eviction.
+
+Smoke verified in Chrome on the ash_feedback_demo continuous page —
+all 8 rows of the smoke matrix in
+`docs/superpowers/plans/2026-04-25-unified-entry-phase-3.md` Task 7
+green: rrweb-player UMD loads (constructor resolved via
+`.default || .Player`), pill-action slot mounts/unmounts on pill
+appear/disappear, REVIEW screen renders the mini-player from local
+events, Re-record restarts the session, Continue advances to
+describe with recording duration, programmatic addon registration
+via `paths:` filter mounts on Path B and unmounts on Stop without
+spurious re-mounts on `panel.close`.
+
+**Out of scope, deferred to ash_feedback companion phase**: audio
+addon migration from `slot: "form-top"` + `modes: ["on_demand"]` to
+`slot: "pill-action"` + `slot: "review-media"` + `paths:
+[:record_and_report]`. Tracked in
+`~/Dev/ash_feedback/docs/superpowers/specs/2026-04-25-audio-addon-pill-relocation-design.md`.
+
+**Out of scope, deferred to Phase 4**: drop the `modes:` legacy
+shim once the ash_feedback audio addon has migrated. Drop the
+`open()` global alias for `openPanel()` (retained one more phase
+for back-compat).
+
 ### ADR-0006 Phase 2 — Two-option entry panel + Path A UX (2026-04-25)
 
 The `<.phoenix_replay_widget>` `recording` attr is **removed** (ADR-0006
