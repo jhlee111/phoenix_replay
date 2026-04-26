@@ -76,4 +76,23 @@ function assert(cond, msg) {
   assert(buf.size() === 0, "size after drain");
 }
 
-console.log("OK ring_buffer_test (4 cases)");
+// --- snapshot() returns events without draining ---
+{
+  let now = 0;
+  const buf = createRingBuffer({ maxEvents: 10, windowMs: null, nowFn: () => now });
+  buf.push({ k: 1 });
+  buf.push({ k: 2 });
+  const first = buf.snapshot();
+  assert(first.length === 2, "snapshot returns current contents");
+  assert(first[0].k === 1, "snapshot preserves order");
+  assert(buf.size() === 2, "snapshot does NOT drain");
+  // Mutate the returned array — buffer must be unaffected
+  first.push({ k: 99 });
+  assert(buf.size() === 2, "snapshot returns a copy, not a live reference");
+  // Drain after snapshot still works normally
+  const drained = buf.drain();
+  assert(drained.length === 2, "drain after snapshot returns full contents");
+  assert(buf.size() === 0, "drain empties the buffer");
+}
+
+console.log("OK ring_buffer_test (5 cases)");

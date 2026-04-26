@@ -193,6 +193,13 @@
         const out = arr.splice(0, arr.length).map((entry) => entry.event);
         return out;
       },
+      // Non-destructive read for "snapshot, POST, only drain on success"
+      // patterns — used by client.reportNow so a failed POST doesn't
+      // silently lose captured context (a retry sends events: [] otherwise).
+      snapshot() {
+        evictByTime();
+        return arr.map((entry) => entry.event);
+      },
       size() {
         evictByTime();
         return arr.length;
@@ -453,13 +460,14 @@
       transitionToPassive();
     }
 
-    // Path A submit (ADR-0006). Drains the ring buffer client-side and
-    // POSTs everything in one shot to /report. No /session handshake;
-    // no /events flush; no state transition (we stay :passive).
-    // The recorder keeps running so the buffer immediately starts
-    // refilling for any subsequent Report Now.
+    // Path A submit (ADR-0006). Snapshots the ring buffer and POSTs
+    // everything in one shot to /report. Only drains the buffer on
+    // success — a failed POST leaves the captured events in the buffer
+    // so a retry click on Send doesn't ship events: []. No /session
+    // handshake; no state transition; the recorder keeps running so
+    // the buffer also picks up new activity in the meantime.
     async function reportNow({ description, severity, metadata = {}, jamLink = null, extras = {} }) {
-      const events = buffer.drain();
+      const events = buffer.snapshot();
 
       const result = await postJson(`${basePath}${cfg.reportPath}`, {
         description,
@@ -474,6 +482,9 @@
         // No sessionToken on /report — endpoint mints its own session.
       });
 
+      // Only reached on success; drain so a follow-up Report Now
+      // doesn't double-ship the same events.
+      buffer.drain();
       return result;
     }
 
@@ -803,6 +814,18 @@
     pathAForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const data = new FormData(pathAForm);
+
+      // The severity <label> is hidden by default; show_severity wiring
+      // un-hides it. When hidden the host opted out, so strip the
+      // FormData entry — the panel must not ship a value the host
+      // chose to suppress, which would clobber any controller-side
+      // default. The legacy Path B form is wrapped + gated in Task 6
+      // and gets the same treatment there.
+      const severityField = pathAForm.querySelector(".phx-replay-severity-field");
+      if (severityField && severityField.hidden) {
+        data.delete("severity");
+      }
+
       pathAStatus.textContent = "Sending…";
       try {
         await onPathASubmitHandler(data);
