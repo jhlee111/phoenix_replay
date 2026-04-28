@@ -204,6 +204,50 @@ defmodule PhoenixReplay.Session do
   @doc false
   def via(session_id), do: {:via, Registry, {PhoenixReplay.SessionRegistry, session_id}}
 
+  # Capture-stream API (ADR-0007). Invoked by PhoenixReplay.CaptureStream.
+
+  @doc false
+  @spec pid_for(String.t()) :: pid() | nil
+  def pid_for(session_id) when is_binary(session_id) do
+    case Registry.lookup(PhoenixReplay.SessionRegistry, session_id) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
+  end
+
+  @doc false
+  @spec attach_stream(pid(), String.t(), keyword()) :: :ok
+  def attach_stream(pid, stream_id, opts) do
+    GenServer.call(pid, {:attach_stream, stream_id, opts})
+  end
+
+  @doc false
+  @spec record_clock_offset(pid(), integer()) :: :ok
+  def record_clock_offset(pid, browser_started_at_ms) do
+    GenServer.call(pid, {:record_clock_offset, browser_started_at_ms})
+  end
+
+  @doc false
+  @spec handle_capture_push(pid(), String.t(), map()) :: :ok
+  def handle_capture_push(pid, stream_id, event) do
+    GenServer.cast(pid, {:capture_push, stream_id, event})
+  end
+
+  @doc false
+  @spec drain_capture_streams(pid()) :: [map()]
+  def drain_capture_streams(pid) do
+    GenServer.call(pid, :drain_capture_streams)
+  end
+
+  @doc false
+  # Test helper — overrides the timestamp used by record_clock_offset
+  # as `server_received_at_ms`. Production path uses
+  # System.system_time(:millisecond) directly.
+  @spec set_clock_received_at_for_test(pid(), integer()) :: :ok
+  def set_clock_received_at_for_test(pid, ts) do
+    GenServer.call(pid, {:set_clock_received_at, ts})
+  end
+
   # GenServer
 
   @doc false
@@ -231,7 +275,16 @@ defmodule PhoenixReplay.Session do
       idle_timer: nil,
       dedup: DedupeBuffer.new(@recent_seqs_capacity),
       pubsub: Config.pubsub(),
-      topic: topic_for(session_id)
+      topic: topic_for(session_id),
+      # Capture-stream state (ADR-0007).
+      # capture_streams: stream_id => :queue.t() of raw push_event maps
+      # capture_opts:    stream_id => keyword() (e.g. max_events: 5000)
+      # clock_offset:    integer | nil — server_time - browser_time
+      # clock_received_at_ms: integer | nil — test override for offset calc
+      capture_streams: %{},
+      capture_opts: %{},
+      clock_offset: nil,
+      clock_received_at_ms: nil
     }
 
     broadcast_global(state, {:session_started, session_id, identity, now})
@@ -299,11 +352,94 @@ defmodule PhoenixReplay.Session do
     {:reply, state_summary(state), state}
   end
 
+  # Capture-stream handlers (ADR-0007).
+
+  @capture_default_max_events 5_000
+
+  def handle_call({:attach_stream, stream_id, opts}, _from, state) do
+    state = %{
+      state
+      | capture_streams: Map.put_new(state.capture_streams, stream_id, :queue.new()),
+        capture_opts: Map.put(state.capture_opts, stream_id, opts)
+    }
+
+    PhoenixReplay.CaptureStream.Registry.register(state.session_id, stream_id, self())
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:record_clock_offset, browser_started_at_ms}, _from, state) do
+    received_at = state.clock_received_at_ms || System.system_time(:millisecond)
+    offset = received_at - browser_started_at_ms
+    {:reply, :ok, %{state | clock_offset: offset}}
+  end
+
+  def handle_call(:drain_capture_streams, _from, state) do
+    offset = state.clock_offset || 0
+
+    events =
+      Enum.flat_map(state.capture_streams, fn {stream_id, queue} ->
+        queue
+        |> :queue.to_list()
+        |> Enum.map(fn ev ->
+          %{
+            "type" => 6,
+            "timestamp" => ev.server_time_ms - offset,
+            "data" => %{"plugin" => stream_id, "payload" => ev.payload}
+          }
+        end)
+      end)
+
+    cleared = Map.new(state.capture_streams, fn {sid, _} -> {sid, :queue.new()} end)
+    {:reply, events, %{state | capture_streams: cleared}}
+  end
+
+  def handle_call({:set_clock_received_at, ts}, _from, state) do
+    {:reply, :ok, %{state | clock_received_at_ms: ts}}
+  end
+
   @impl true
   def handle_info(:idle_timeout, state) do
     broadcast(state, {:session_abandoned, state.session_id, state.last_event_at})
     broadcast_global(state, {:session_abandoned, state.session_id, state.last_event_at})
     {:stop, :normal, state}
+  end
+
+  @impl true
+  def handle_cast({:capture_push, stream_id, event}, state) do
+    case Map.fetch(state.capture_streams, stream_id) do
+      :error ->
+        {:noreply, state}
+
+      {:ok, queue} ->
+        max =
+          state.capture_opts
+          |> Map.get(stream_id, [])
+          |> Keyword.get(:max_events, @capture_default_max_events)
+
+        queue = :queue.in(event, queue)
+
+        queue =
+          case :queue.len(queue) do
+            n when n > max ->
+              {{:value, _evicted}, q2} = :queue.out(queue)
+              q2
+
+            _ ->
+              queue
+          end
+
+        {:noreply, put_in(state.capture_streams[stream_id], queue)}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    # Purge capture-stream Registry entries for this session so subsequent
+    # CaptureStream.push_event/3 calls become silent no-ops rather than
+    # routing to a stopped pid. Belt-and-suspenders with the Registry's
+    # own :DOWN monitor handler.
+    PhoenixReplay.CaptureStream.Registry.unregister_session(state.session_id)
+    :ok
   end
 
   # Internals
