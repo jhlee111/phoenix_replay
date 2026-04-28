@@ -9,6 +9,7 @@ defmodule PhoenixReplay.Application do
       [
         PhoenixReplay.RateLimiter,
         {Registry, keys: :unique, name: PhoenixReplay.SessionRegistry},
+        PhoenixReplay.CaptureStream.Registry,
         PhoenixReplay.SessionSupervisor
       ] ++ pubsub_child()
 
