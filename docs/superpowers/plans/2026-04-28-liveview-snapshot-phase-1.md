@@ -25,6 +25,7 @@
 | Shape extraction default extractor table | Task 2 |
 | Performance budget (`< 5µs` no-op path) | Task 3 (ETS lookup) + Task 9 (smoke timing) |
 | Failure semantics (try/rescue) | Task 6 |
+| Session-id propagation host LV ↔ widget (cookie + `Plug.Session`) | Task 7.5 |
 | Observability telemetry events | **Deferred to Phase 3** |
 | Replay UI (admin sidebar tab) | **Deferred to Phase 2** |
 | `use PhoenixReplay.LiveView` macro + allowlist | **Deferred to Phase 2** |
@@ -44,8 +45,10 @@
 | `lib/phoenix_replay/session.ex` | Modify | Extend GenServer state with `capture_streams`, `capture_opts`, `clock_offset` fields; add `handle_cast({:capture_push, stream_id, event}, state)` + `handle_call(:drain_capture_streams, _, state)`; ensure ETS rows registered on stream attach and cleaned on session terminate |
 | `lib/phoenix_replay/application.ex` | Modify | Start `PhoenixReplay.CaptureStream.Registry` (owns the ETS table) before `Session.Supervisor` |
 | `lib/phoenix_replay/live_view/registry.ex` | **Create** | `Registry`-based `transport_pid → session_id` map (separate from CaptureStream's ETS, scoped to LiveView wiring) |
-| `lib/phoenix_replay/live_view/snapshots.ex` | **Create** | `on_mount/4` callback; `attach_hook` registrations for `:handle_event`, `:handle_info`, `:handle_async`, `:handle_params`; transient `:after_render` for snapshot pairing; 50ms-per-`{lv_pid, event_name}` throttle; `try/rescue` wrappers; mount baseline |
+| `lib/phoenix_replay/live_view/snapshots.ex` | **Create** | `on_mount/4` callback; reads `session["phx_replay_session_id"]`; registers in `LiveView.Registry`; calls `Session.attach_stream/3`; `attach_hook` registrations for `:handle_event`, `:handle_info`, `:handle_async`, `:handle_params`; transient `:after_render` for snapshot pairing; 50ms-per-`{lv_pid, event_name}` throttle; `try/rescue` wrappers; mount baseline |
 | `priv/static/assets/phoenix_replay.js` | Modify | Send `client_started_at_ms` in the existing `/session` and `/report` POST bodies; include the same value in `/submit` for Path B parity |
+| `lib/phoenix_replay/plug/session_link.ex` | **Create** | Reads the `phx_replay_session_id` cookie set by `SessionController` and copies it into the host's `Plug.Session` via `put_session/3` so LV `mount/3`'s `session` arg surfaces it. Host adds this plug to their `:browser` pipeline after `Plug.Session` |
+| `lib/phoenix_replay/controller/session_controller.ex` | Modify | After minting/resuming, call `put_resp_cookie/4` so the host's next `:browser` request carries `phx_replay_session_id` |
 | `lib/phoenix_replay/controller/events_controller.ex` | Modify | On `/session` (or first `/events` if no `/session` exists; this codebase uses `/session` for both Path A `:active` and Path B), call `CaptureStream.record_clock_offset/2` before pipeline returns |
 | `lib/phoenix_replay/controller/report_controller.ex` | Modify | Path A: call `record_clock_offset/2` with the inline `client_started_at_ms`; flush server-side capture stream and merge with rrweb batch before persist |
 | `lib/phoenix_replay/controller/submit_controller.ex` | Modify | Path B: flush server-side capture stream and merge before final persist + close |
@@ -53,6 +56,7 @@
 | `test/phoenix_replay/capture_stream_test.exs` | **Create** | attach/push/flush correctness; offset application; missing-offset fallback; concurrent push/flush; overflow eviction |
 | `test/phoenix_replay/session_capture_test.exs` | **Create** | Session GenServer cast + drain handlers under realistic flow |
 | `test/phoenix_replay/live_view/snapshots_test.exs` | **Create** | LiveView integration: hooks attach when registry has session, do not attach otherwise; capture callbacks emit expected payloads; rescue path keeps LV alive on extractor crash |
+| `test/phoenix_replay/plug/session_link_test.exs` | **Create** | Plug unit: cookie present → `put_session` called; absent → conn untouched; pipeline ordering (must run after `:fetch_session` + `Plug.Session`) |
 | `test/phoenix_replay/integration/lv_snapshot_e2e_test.exs` | **Create** | End-to-end: synthetic LV mounts, fires events, `/submit` flushes, events row contains type-6 plugin events with browser-timeline timestamps |
 | `CHANGELOG.md` | Modify | Unreleased → "Phase 1 — LiveView snapshot stream foundation" entry |
 | `docs/decisions/0007-liveview-snapshot-stream.md` | **Create** | ADR-0007 (Proposed → Accepted as part of Phase 1 land) |
@@ -921,7 +925,11 @@ The CaptureStream module is the public API. The Registry submodule owns the ETS 
 
     def events(pid), do: Agent.get(pid, & &1.events)
     def clock_offset(pid), do: Agent.get(pid, & &1.offset)
-    def set_received_at(pid, ts), do: Agent.update(pid, &%{&1 | received_at: ts}), do: :ok
+
+    def set_received_at(pid, ts) do
+      Agent.update(pid, &%{&1 | received_at: ts})
+      :ok
+    end
   end
   ```
 
@@ -1408,6 +1416,10 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
       session_id = "lv-snap-#{System.unique_integer([:positive])}"
       {:ok, sess_pid} = Session.start_session(session_id, @identity, seq_watermark: 0)
       :ok = Session.attach_stream(sess_pid, @stream_id, [])
+      # The Snapshots.on_mount tests register from inside on_mount,
+      # but the unit tests of capture_handle_event_for_test/3 call
+      # the hook directly without going through on_mount, so we need
+      # the LV.Registry pre-populated for those.
       :ok = PhoenixReplay.LiveView.Registry.register(session_id)
 
       on_exit(fn ->
@@ -1420,7 +1432,7 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
     test "capture_handle_event/3 emits an event marker into the stream",
          %{session_id: session_id} do
       socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, count: 0},
+        assigns: %{__changed__: %{}, __phx_replay_session_id__: session_id, count: 0},
         view: __MODULE__.FakeLive,
         transport_pid: self()
       }
@@ -1436,11 +1448,15 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
     end
 
     test "capture path swallows raises so host LV is not affected",
-         %{session_id: _session_id} do
+         %{session_id: session_id} do
       # Pass a socket with a deliberately broken extractor target —
       # the rescue must keep the LV alive.
       socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, broken: %BrokenStruct{}},
+        assigns: %{
+          __changed__: %{},
+          __phx_replay_session_id__: session_id,
+          broken: %BrokenStruct{}
+        },
         view: __MODULE__.FakeLive,
         transport_pid: self()
       }
@@ -1452,18 +1468,14 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
                Snapshots.capture_handle_event_for_test("evt", %{}, socket)
     end
 
-    test "no session in registry → hooks are not attached" do
-      # A fresh process with no register call. on_mount should
-      # short-circuit and return {:cont, socket} without attaching.
-      Task.async(fn ->
-        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}}}
+    test "session map without phx_replay_session_id → on_mount is a no-op" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}},
+        view: __MODULE__.FakeLive
+      }
 
-        # capture_handle_event_for_test bypasses the hook indirection
-        # but Snapshots.on_mount/4 is what actually decides whether to
-        # attach. We test on_mount directly here.
-        assert {:cont, _} = Snapshots.on_mount(:install, %{}, %{}, socket)
-      end)
-      |> Task.await()
+      # session arg empty — on_mount must short-circuit cleanly.
+      assert {:cont, ^socket} = Snapshots.on_mount(:install, %{}, %{}, socket)
     end
 
     defmodule FakeLive do
@@ -1532,18 +1544,37 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
     @throttle_ms 50
 
     @doc """
-    `on_mount` callback. Looks up the session in
-    `PhoenixReplay.LiveView.Registry` (populated upstream by the
-    client widget's connect params plumbing in `Snapshots.register/2`).
-    If a session is associated, registers the LV process and attaches
-    capture hooks for all relevant callback stages. Otherwise, returns
-    immediately with no overhead beyond the registry lookup.
+    `on_mount` callback. Reads `phx_replay_session_id` from the LV's
+    `session` map (populated by `PhoenixReplay.Plug.SessionLink` from
+    the cookie set by `SessionController` — see Task 7.5). If
+    present, registers the LV process in `PhoenixReplay.LiveView.Registry`,
+    ensures the snapshot stream is attached on the Session GenServer,
+    and attaches capture hooks for all relevant callback stages.
+
+    If `phx_replay_session_id` is absent (host did not install the
+    `Plug.SessionLink` plug, or no recording session exists), returns
+    immediately with no overhead.
     """
     @spec on_mount(:install, map(), map(), Phoenix.LiveView.Socket.t()) ::
             {:cont, Phoenix.LiveView.Socket.t()}
-    def on_mount(:install, _params, _session, socket) do
-      case Registry.lookup() do
-        {:ok, session_id} ->
+    def on_mount(:install, _params, session, socket) do
+      case extract_session_id(session) do
+        nil ->
+          {:cont, socket}
+
+        session_id ->
+          # Register self() so attach_hook callbacks can identify the
+          # session via Registry.lookup() without re-parsing session.
+          _ = Registry.register(session_id)
+
+          # Idempotently attach the LV snapshot stream to Session
+          # GenServer state. handle_call({:attach_stream, ...}, ...)
+          # uses Map.put_new so a second attach is a no-op.
+          case PhoenixReplay.Session.pid_for(session_id) do
+            nil -> :ok
+            pid -> PhoenixReplay.Session.attach_stream(pid, @stream_id, [])
+          end
+
           socket =
             socket
             |> assign(:__phx_replay_session_id__, session_id)
@@ -1555,19 +1586,16 @@ The orchestration module. `on_mount/4` is invoked by hosts via their `live_sessi
             |> capture_baseline()
 
           {:cont, socket}
-
-        :error ->
-          {:cont, socket}
       end
     end
 
-    @doc """
-    Register the current LiveView process as part of `session_id`.
-    Called by the host (or by an upstream library plug — see Task 7
-    for the connect-params-driven registration in Path B).
-    """
-    @spec register(String.t()) :: :ok
-    def register(session_id), do: Registry.register(session_id)
+    # Accept both "phx_replay_session_id" (Plug.Session string keys)
+    # and :phx_replay_session_id (atom keys for tests / direct calls).
+    defp extract_session_id(session) when is_map(session) do
+      session["phx_replay_session_id"] || session[:phx_replay_session_id]
+    end
+
+    defp extract_session_id(_), do: nil
 
     # Test-only entry point — allows the unit test in Task 6 to drive
     # capture_handle_event/3 without the full attach_hook plumbing.
@@ -1849,6 +1877,232 @@ The widget already POSTs to `/session`, `/report`, and `/submit`. Add a `client_
 
 ---
 
+## Task 7.5 — `PhoenixReplay.Plug.SessionLink` + cookie set in `SessionController`
+
+**Files:**
+- Create: `lib/phoenix_replay/plug/session_link.ex`
+- Modify: `lib/phoenix_replay/controller/session_controller.ex`
+- Create: `test/phoenix_replay/plug/session_link_test.exs`
+
+The widget POSTs to `/session` (via the `:feedback_ingest` pipeline). The host's LiveView pages run through `:browser` (with `Plug.Session`). Those two pipelines don't share session state. We bridge them with:
+
+1. **Cookie**: `SessionController` sets `phx_replay_session_id` cookie on the `/session` response. Same domain → automatically attached to subsequent host requests.
+2. **Plug**: `PhoenixReplay.Plug.SessionLink`, added by hosts to their `:browser` pipeline after `Plug.Session`, reads the cookie and copies the value into the Phoenix session via `put_session/3`. From there, LV `mount/3`'s `session` arg surfaces it, and `Snapshots.on_mount` reads it (Task 6 modification).
+
+This is the minimum host-side wiring: one plug line in the `:browser` pipeline + one `on_mount` line in the `live_session`. Both documented in the README addendum that lands with the ADR.
+
+- [ ] **Step 1: Write the failing test.** Create `test/phoenix_replay/plug/session_link_test.exs`:
+
+  ```elixir
+  defmodule PhoenixReplay.Plug.SessionLinkTest do
+    use ExUnit.Case, async: true
+    use Plug.Test
+
+    alias PhoenixReplay.Plug.SessionLink
+
+    @session_options Plug.Session.init(
+                       store: :cookie,
+                       key: "_test_session",
+                       signing_salt: "saltsalt",
+                       encryption_salt: "encsaltenc"
+                     )
+
+    defp pipeline(conn) do
+      conn
+      |> Plug.Session.call(@session_options)
+      |> Plug.Conn.fetch_session()
+    end
+
+    test "copies cookie value into session when present" do
+      conn =
+        :get
+        |> conn("/")
+        |> Map.put(:secret_key_base, String.duplicate("x", 64))
+        |> Map.put(:cookies, %{"phx_replay_session_id" => "session-abc"})
+        |> Map.put(:req_cookies, %{"phx_replay_session_id" => "session-abc"})
+        |> pipeline()
+        |> SessionLink.call(SessionLink.init([]))
+
+      assert Plug.Conn.get_session(conn, "phx_replay_session_id") == "session-abc"
+    end
+
+    test "no-op when cookie missing" do
+      conn =
+        :get
+        |> conn("/")
+        |> Map.put(:secret_key_base, String.duplicate("x", 64))
+        |> pipeline()
+        |> SessionLink.call(SessionLink.init([]))
+
+      assert Plug.Conn.get_session(conn, "phx_replay_session_id") == nil
+    end
+
+    test "raises a clear error when fetch_session was not run before" do
+      # If the host orders the plug before :fetch_session, calling
+      # put_session/3 raises an opaque ArgumentError. Our plug should
+      # detect this and either skip cleanly or raise a phoenix_replay
+      # error message that names the misordering. Phase 1 chooses
+      # "skip cleanly" — silent no-op. Test confirms no raise.
+      conn =
+        :get
+        |> conn("/")
+        |> Map.put(:secret_key_base, String.duplicate("x", 64))
+        |> Map.put(:cookies, %{"phx_replay_session_id" => "session-abc"})
+        |> Map.put(:req_cookies, %{"phx_replay_session_id" => "session-abc"})
+        # NB: no fetch_session
+
+      # Should not raise.
+      _ = SessionLink.call(conn, SessionLink.init([]))
+    end
+  end
+  ```
+
+- [ ] **Step 2: Run the test, verify it fails.**
+
+  ```bash
+  cd ~/Dev/phoenix_replay
+  mix test test/phoenix_replay/plug/session_link_test.exs
+  ```
+
+  Expected: `PhoenixReplay.Plug.SessionLink is undefined`.
+
+- [ ] **Step 3: Implement the plug.** Create `lib/phoenix_replay/plug/session_link.ex`:
+
+  ```elixir
+  defmodule PhoenixReplay.Plug.SessionLink do
+    @moduledoc """
+    Bridges phoenix_replay's session_id cookie into the host's
+    `Plug.Session` so LiveView mounts can read it from `session` arg.
+
+    ## Why
+
+    The phoenix_replay widget POSTs to `/session` via a separate
+    pipeline (`:feedback_ingest`) that does not share state with the
+    host's `:browser` pipeline. The widget receives a session_id in
+    the JSON response. To make that session_id available inside host
+    LiveViews — so `PhoenixReplay.LiveView.Snapshots.on_mount` can
+    register the LV process under the recording session — we cookie
+    it at `/session` response time and copy it into the host's
+    session here.
+
+    ## Installation
+
+        # in your endpoint or router
+        pipeline :browser do
+          plug :accepts, ["html"]
+          plug :fetch_session
+          plug Plug.Session, @session_options  # whatever the host has
+          plug PhoenixReplay.Plug.SessionLink   # ← add this line
+          plug :fetch_live_flash
+          # ...
+        end
+
+    Order matters: this plug must run after `:fetch_session` (so
+    `put_session/3` is callable). If misordered, this plug becomes a
+    silent no-op rather than crashing the host's pipeline.
+
+    ## Cookie name
+
+    The cookie is `phx_replay_session_id`. Set by
+    `PhoenixReplay.SessionController` after a successful
+    `/session` POST.
+    """
+
+    @cookie_name "phx_replay_session_id"
+    @session_key "phx_replay_session_id"
+
+    @behaviour Plug
+
+    @impl true
+    def init(opts), do: opts
+
+    @impl true
+    def call(conn, _opts) do
+      conn = Plug.Conn.fetch_cookies(conn)
+
+      case conn.cookies[@cookie_name] do
+        nil ->
+          conn
+
+        session_id when is_binary(session_id) ->
+          try do
+            Plug.Conn.put_session(conn, @session_key, session_id)
+          rescue
+            # If :fetch_session hasn't run, put_session raises with
+            # an opaque error. Silent no-op is preferable to
+            # crashing the host's pipeline — the LV will simply not
+            # capture state, identical to the not-installed case.
+            ArgumentError -> conn
+          end
+      end
+    end
+  end
+  ```
+
+- [ ] **Step 4: Modify `SessionController` to set the cookie.** Open `lib/phoenix_replay/controller/session_controller.ex`. Find `mint_response/4` and update the success branch:
+
+  ```elixir
+  defp mint_response(conn, identity, session_id, opts) do
+    case SessionToken.mint(session_id, identity) do
+      {:ok, token} ->
+        conn
+        |> put_resp_cookie("phx_replay_session_id", session_id,
+          http_only: true,
+          same_site: "Lax",
+          secure: conn.scheme == :https,
+          path: "/"
+        )
+        |> put_status(:ok)
+        |> json(%{
+          token: token,
+          session_id: session_id,
+          resumed: Keyword.fetch!(opts, :resumed),
+          seq_watermark: Keyword.fetch!(opts, :seq_watermark)
+        })
+
+      {:error, reason} ->
+        reason_error(conn, reason)
+    end
+  end
+  ```
+
+  Note: `same_site: "Lax"` (not `Strict`) so the cookie is sent on top-level navigations from same-site requests — necessary because the host's first GET `/` after `/session` POST is exactly that. `http_only: true` keeps it out of `document.cookie` (we don't need JS access). `secure: conn.scheme == :https` is dynamic for dev (http) vs prod (https).
+
+- [ ] **Step 5: Run the test, verify it passes.**
+
+  ```bash
+  mix test test/phoenix_replay/plug/session_link_test.exs
+  ```
+
+  Expected: all tests pass.
+
+- [ ] **Step 6: Commit.**
+
+  ```bash
+  git add lib/phoenix_replay/plug/session_link.ex \
+          lib/phoenix_replay/controller/session_controller.ex \
+          test/phoenix_replay/plug/session_link_test.exs
+  git commit -m "$(cat <<'EOF'
+  feat(plug): SessionLink bridge — cookie ↔ Plug.Session for LV mounts
+
+  /session response now sets phx_replay_session_id cookie. Hosts add
+  PhoenixReplay.Plug.SessionLink to their :browser pipeline (after
+  Plug.Session) to surface the cookie via put_session/3 — making the
+  session_id available to LiveView mount/3's session arg.
+
+  Together with Task 6's on_mount, this lets recorded sessions
+  capture LiveView state with two host-side lines: one plug entry +
+  one on_mount entry.
+
+  Phase 1 of ADR-0007.
+
+  Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+  EOF
+  )"
+  ```
+
+---
+
 ## Task 8 — Server-side `record_clock_offset` + ingest merge
 
 **Files:**
@@ -2023,6 +2277,8 @@ The integration test mounts a synthetic LV inside the test environment, drives a
       use Phoenix.LiveView, layout: false
 
       def mount(_params, _session, socket) do
+        # session is read by Snapshots.on_mount; no work for the LV
+        # itself. Just initialize state.
         {:ok, assign(socket, :count, 0)}
       end
 
@@ -2053,20 +2309,19 @@ The integration test mounts a synthetic LV inside the test environment, drives a
     end
 
     test "mounting an instrumented LV produces baseline + post-event snapshots",
-         %{session_id: session_id, sess_pid: sess_pid} do
-      # The Phoenix.LiveViewTest runner runs the LV in a separate process.
-      # Register that process as part of our session via a hook.
-      parent = self()
+         %{session_id: session_id} do
+      # Wire the on_mount through Phoenix.LiveViewTest by passing
+      # `session: %{...}` to live_isolated/3. The on_mount reads
+      # phx_replay_session_id from session and registers itself.
 
-      Task.start_link(fn ->
-        Registry.register(session_id)
-        send(parent, :registered)
-        receive do: (:done -> :ok)
-      end)
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{"phx_replay_session_id" => session_id})
 
-      assert_receive :registered
-
-      {:ok, view, _html} = live_isolated(build_conn(), CounterLive)
+      {:ok, view, _html} =
+        live_isolated(conn, CounterLive,
+          on_mount: [{PhoenixReplay.LiveView.Snapshots, :install}]
+        )
 
       assert render_click(view, "inc") =~ "count: 1"
 
@@ -2082,6 +2337,12 @@ The integration test mounts a synthetic LV inside the test environment, drives a
              end),
              "expected a handle_event marker in flushed events; got #{inspect(events, limit: :infinity)}"
 
+      # Mount baseline must also be present.
+      assert Enum.any?(events, fn e ->
+               get_in(e, ["data", "payload", :callback]) == :mount
+             end),
+             "expected a mount baseline marker"
+
       # Timestamps should be converted to browser timeline (server - 500).
       timestamps = Enum.map(events, & &1["timestamp"])
       assert Enum.all?(timestamps, &is_integer/1)
@@ -2089,7 +2350,7 @@ The integration test mounts a synthetic LV inside the test environment, drives a
   end
   ```
 
-  Note: the `Registry.register` is done from a sibling process because the LV runs in a separate process under `Phoenix.LiveViewTest`. The integration is approximate — the production path will register from the Snapshots `on_mount` which runs in the LV process. For Phase 1, this end-to-end shape is sufficient to validate the wiring.
+  Note: `Plug.Test.init_test_session/2` populates the conn's Plug session with the given map. `live_isolated/3`'s default on_mount processing reads from that conn's session. Snapshots.on_mount runs inside the LV process and reads `session["phx_replay_session_id"]` — register and attach happen there. This mirrors the production flow exactly (cookie → SessionLink plug → Plug.Session → LV mount session arg → on_mount).
 
 - [ ] **Step 2: Run the test, verify it passes.**
 
