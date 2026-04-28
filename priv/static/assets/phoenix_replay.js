@@ -319,7 +319,14 @@
     async function ensureSession() {
       if (sessionToken) return;
       const stored = storageRead(STORAGE_KEYS.TOKEN);
-      const res = await postJson(`${basePath}${cfg.sessionPath}`, {}, {
+      const res = await postJson(`${basePath}${cfg.sessionPath}`, {
+        // ADR-0007: server records this against System.system_time/1
+        // to compute clock_offset = server_received_at - client_started_at.
+        // Subsequent server-origin capture events (LV snapshots etc.)
+        // have their server timestamps converted to browser timeline
+        // by subtracting this offset at flush time.
+        client_started_at_ms: Date.now(),
+      }, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
         sessionToken: stored,
@@ -489,6 +496,7 @@
         metadata,
         jam_link: jamLink,
         extras,
+        client_started_at_ms: Date.now(),
       }, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
@@ -517,6 +525,7 @@
         metadata,
         jam_link: jamLink,
         extras,
+        client_started_at_ms: Date.now(),
       }, {
         csrfToken,
         csrfHeader: cfg.csrfHeader,
