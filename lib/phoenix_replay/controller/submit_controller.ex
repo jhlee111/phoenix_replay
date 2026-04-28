@@ -9,7 +9,7 @@ defmodule PhoenixReplay.SubmitController do
 
   import PhoenixReplay.Controller.Helpers, only: [fetch_id: 1, stringify_keys: 1]
 
-  alias PhoenixReplay.{ChangesetErrors, Hook, Session, Storage}
+  alias PhoenixReplay.{CaptureStream, ChangesetErrors, Hook, Session, Storage}
   alias PhoenixReplay.Ingest.{Error, Pipeline}
   alias PhoenixReplay.Plug.Identify
 
@@ -22,6 +22,7 @@ defmodule PhoenixReplay.SubmitController do
 
     with {:ok, ctx} <- Pipeline.fetch_token(ctx),
          {:ok, ctx} <- Pipeline.verify_token(ctx),
+         {:ok, ctx} <- flush_capture_streams(ctx),
          {:ok, ctx} <- submit_feedback(ctx) do
       # Best-effort close — if the Session process already exited
       # (idle timeout, crash), the broadcast is skipped silently.
@@ -32,6 +33,29 @@ defmodule PhoenixReplay.SubmitController do
       |> json(%{ok: true, id: fetch_id(ctx.feedback)})
     else
       {:error, %Error{} = err} -> Pipeline.respond(conn, err)
+    end
+  end
+
+  # ADR-0007: drain server-origin capture streams (LV snapshots and
+  # any other registered streams) before finalizing the feedback. The
+  # drained events are persisted as a final batch at watermark+1 — the
+  # admin player iterates events sorted by timestamp, so seq order
+  # doesn't matter for replay. Best-effort: if anything fails here, we
+  # log and continue rather than blocking the submit.
+  defp flush_capture_streams(%{session_id: session_id} = ctx) do
+    case CaptureStream.flush_for_session(session_id) do
+      [] ->
+        {:ok, ctx}
+
+      events when is_list(events) ->
+        with {:ok, watermark} <- Session.seq_watermark(session_id),
+             :ok <- Session.append_events(session_id, watermark + 1, events) do
+          {:ok, ctx}
+        else
+          _ ->
+            # Capture stream is best-effort — never block submit.
+            {:ok, ctx}
+        end
     end
   end
 

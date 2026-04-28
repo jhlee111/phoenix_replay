@@ -58,13 +58,28 @@ defmodule PhoenixReplay.EventsController do
     end
   end
 
-  defp lookup_or_start_session(%{session_id: session_id, identity: identity} = ctx) do
+  defp lookup_or_start_session(%{session_id: session_id, identity: identity, params: params} = ctx) do
     case Session.lookup_or_start(session_id, identity) do
-      {:ok, _pid} -> {:ok, ctx}
-      {:error, :no_session} -> {:error, Error.new(410, "session_expired")}
-      {:error, other} -> {:error, Error.new(500, "append_failed", detail: inspect(other))}
+      {:ok, pid} ->
+        # ADR-0007: client may have re-initialized after a resume — apply
+        # the latest client_started_at_ms if present. Idempotent: a second
+        # call replaces the previous offset.
+        maybe_record_clock_offset(pid, params)
+        {:ok, ctx}
+
+      {:error, :no_session} ->
+        {:error, Error.new(410, "session_expired")}
+
+      {:error, other} ->
+        {:error, Error.new(500, "append_failed", detail: inspect(other))}
     end
   end
+
+  defp maybe_record_clock_offset(pid, %{"client_started_at_ms" => ms}) when is_integer(ms) do
+    Session.record_clock_offset(pid, ms)
+  end
+
+  defp maybe_record_clock_offset(_pid, _), do: :ok
 
   defp append_events(%{session_id: session_id, seq: seq, batch: batch} = ctx) do
     scrubbed = Scrub.scrub_batch(batch)
