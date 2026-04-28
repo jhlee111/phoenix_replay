@@ -49,6 +49,16 @@ defmodule PhoenixReplay.SessionController do
     case SessionToken.mint(session_id, identity) do
       {:ok, token} ->
         conn
+        # ADR-0007: cookie is the cross-pipeline bridge to LV mounts.
+        # Host's :browser pipeline sees this cookie automatically;
+        # PhoenixReplay.Plug.SessionLink copies it into Plug.Session
+        # so LV mount/3's session arg surfaces phx_replay_session_id.
+        |> put_resp_cookie("phx_replay_session_id", session_id,
+          http_only: true,
+          same_site: "Lax",
+          secure: conn.scheme == :https,
+          path: "/"
+        )
         |> put_status(:ok)
         |> json(%{
           token: token,
