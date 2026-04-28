@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0007 Phase 1 — LiveView snapshot stream foundation (2026-04-28)
+
+New `PhoenixReplay.CaptureStream` public API for server-origin capture
+streams; `PhoenixReplay.LiveView.Snapshots` as the first internal
+consumer. Hosts add two lines (one plug entry, one `on_mount` entry)
+and recorded sessions begin capturing assigns shape + callback markers,
+persisted alongside rrweb events in the existing `phoenix_replay_events`
+table.
+
+- `PhoenixReplay.CaptureStream` — new public module exposing
+  `record_clock_offset/2`, `attach/3`, `push_event/3`,
+  `flush_for_session/1`. ETS-backed hot-path lookup; missing-session
+  push is a silent no-op.
+- `PhoenixReplay.LiveView.Snapshots` — new on_mount module installed
+  via `live_session`'s `on_mount` list. Attaches `attach_hook`
+  callbacks for `handle_event`, `handle_info`, `handle_async`,
+  `handle_params` and emits paired event marker + snapshot through
+  CaptureStream.
+- `PhoenixReplay.LiveView.Shape` — pure-function shape extractor.
+  Default behavior is leaf-value-free; per-LV value allowlist via the
+  `use PhoenixReplay.LiveView, snapshot:` macro is Phase 2.
+- `PhoenixReplay.Plug.SessionLink` — bridges the
+  `phx_replay_session_id` cookie (set by `SessionController` on
+  `/session` response) into the host's `Plug.Session` so LV
+  `mount/3`'s `session` arg surfaces the session id.
+- `PhoenixReplay.Session` — extended with `capture_streams`,
+  `capture_opts`, `clock_offset` state and a new GenServer protocol
+  for capture-stream calls. No schema migration.
+- Client widget POSTs (`/session`, `/report`, `/submit`) now include
+  `client_started_at_ms: Date.now()` so the server can compute the
+  per-session clock offset that aligns server-origin capture event
+  timestamps to the browser timeline.
+
+Phase 1 ships shape-only — value allowlist macro, custom extractors,
+admin replay UI panel, telemetry events, Benchee performance suite,
+and Igniter auto-install are tracked as Phase 2 / Phase 3 work in
+[`docs/plans/README.md`](docs/plans/README.md).
+
 ### ADR-0005 Phase 3 — Timeline event bus docs (2026-04-26)
 
 The replay player's window-event channel and `subscribeTimeline`

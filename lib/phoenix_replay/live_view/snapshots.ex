@@ -69,10 +69,10 @@ defmodule PhoenixReplay.LiveView.Snapshots do
           socket
           |> assign(:__phx_replay_session_id__, session_id)
           |> assign(:__phx_replay_event_throttle__, %{})
-          |> attach_hook(:phx_replay_hev, :handle_event, &capture_handle_event/3)
-          |> attach_hook(:phx_replay_hin, :handle_info, &capture_handle_info/2)
-          |> attach_hook(:phx_replay_has, :handle_async, &capture_handle_async/3)
-          |> attach_hook(:phx_replay_hpa, :handle_params, &capture_handle_params/3)
+          |> safe_attach_hook(:phx_replay_hev, :handle_event, &capture_handle_event/3)
+          |> safe_attach_hook(:phx_replay_hin, :handle_info, &capture_handle_info/2)
+          |> safe_attach_hook(:phx_replay_has, :handle_async, &capture_handle_async/3)
+          |> safe_attach_hook(:phx_replay_hpa, :handle_params, &capture_handle_params/3)
           |> capture_baseline()
 
         {:cont, socket}
@@ -184,6 +184,17 @@ defmodule PhoenixReplay.LiveView.Snapshots do
     end
   end
 
+  # Wrapper that swallows attach_hook raises (e.g. live_isolated tests
+  # don't support :handle_params; handle_async on older LV versions
+  # may behave differently). A hook that fails to attach silently
+  # degrades the relevant capture path to a no-op rather than
+  # cascading through the whole on_mount pipeline.
+  defp safe_attach_hook(socket, name, stage, fun) do
+    attach_hook(socket, name, stage, fun)
+  rescue
+    _ -> socket
+  end
+
   # ── snapshot pairing via :after_render ────────────────────────
 
   defp attach_pairing_hook(socket, event_id) do
@@ -204,6 +215,8 @@ defmodule PhoenixReplay.LiveView.Snapshots do
 
       detach_hook(s, :phx_replay_after_render, :after_render)
     end)
+  rescue
+    _ -> socket
   end
 
   # ── baseline ──────────────────────────────────────────────────

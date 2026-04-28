@@ -61,10 +61,12 @@ defmodule PhoenixReplay.LiveView.SnapshotsTest do
       transport_pid: self()
     }
 
-    # Even if shape extraction or push had a problem, the wrapper
-    # must return {:cont, socket} to keep the LV alive.
-    assert {:cont, ^socket} =
-             Snapshots.capture_handle_event_for_test("evt", %{}, socket)
+    # Even if shape extraction or attach_hook fails (handbuilt sockets
+    # lack the :lifecycle private the real LV process supplies), the
+    # wrapper must return {:cont, _} to keep the LV alive. We don't
+    # pin to the input socket because successful captures legitimately
+    # mutate assigns (throttle stamp).
+    assert {:cont, _} = Snapshots.capture_handle_event_for_test("evt", %{}, socket)
   end
 
   test "session map without phx_replay_session_id → on_mount is a no-op" do
