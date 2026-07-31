@@ -11,6 +11,7 @@
 | [0005](./0005-replay-player-timeline-event-bus.md) | Replay Player Timeline Event Bus | Accepted | 2026-04-24 |
 | [0006](./0006-unified-feedback-entry.md) | Unified Feedback Entry — Client-Side Ring Buffer + Two-Path UX | Accepted | 2026-04-25 |
 | [0007](./0007-liveview-snapshot-stream.md) | LiveView Snapshot Stream — Server-Origin Capture via `attach_hook` + `CaptureStream` API | Accepted | 2026-04-28 |
+| [0008](./0008-defer-admin-replay-viewer-ui.md) | Defer Admin Replay Viewer UI for LiveView Snapshots (Phase 2) | Accepted | 2026-04-28 |
 
 ## Rules
 

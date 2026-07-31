@@ -528,6 +528,11 @@ allowlisted by default — passwords and tokens are common form params.
 
 ## Replay UI — admin sidebar `LiveView` tab
 
+> **Status (2026-04-28):** Phase 2 (admin replay viewer UI) deferred —
+> see [ADR-0008](../../decisions/0008-defer-admin-replay-viewer-ui.md).
+> This section remains as the design-of-record for if/when work
+> resumes.
+
 ### Slot
 
 A new panel addon slot `admin-sidebar-tab` is added to the existing

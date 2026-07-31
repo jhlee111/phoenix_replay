@@ -6,9 +6,9 @@
 
 In-app bug-report widget + [`rrweb`](https://github.com/rrweb-io/rrweb)
 session-replay ingest for Phoenix applications. Capture console logs,
-network timeline, DOM mutations, and host-supplied metadata from a
-floating widget; store it in your own database; replay it inside your
-own admin UI.
+network timeline, DOM mutations, host-supplied metadata, and — opt-in —
+LiveView assigns shape + callback markers from a floating widget;
+store it in your own database; replay it inside your own admin UI.
 
 No SaaS dependency. No lock-in. MIT.
 
@@ -502,8 +502,14 @@ the baseline patterns (Bearer, API-key, JWT) plus host-specific ones.
 - [x] Phase 1 — Capture client JS (rrweb + widget + session handshake)
 - [x] Phase 2 — Ingest controllers + Ecto storage adapter
 - [x] Phase 3 — Admin UI components + rrweb-player LV hook
-- [x] Phase 4 — Ash companion (`ash_feedback`)
-- [ ] [Phase 5f](docs/plans/5f-igniter-installer.md) — Igniter installer (`mix phoenix_replay.install`)
+- [x] Phase 4 — Ash companion ([`ash_feedback`](https://github.com/jhlee111/ash_feedback))
+- [x] [ADR-0004](docs/decisions/0004-live-session-watch.md) — Live "shoulder-surf" admin LV (`PhoenixReplay.Live.SessionWatch`)
+- [x] [ADR-0005](docs/decisions/0005-replay-player-timeline-event-bus.md) — Replay-player timeline event bus + `subscribeTimeline` helper
+- [x] [ADR-0006](docs/decisions/0006-unified-feedback-entry.md) — Unified feedback entry (Path A "Quick report" + Path B "Record and report") + panel addon API
+- [x] Phase 5f — Igniter installer (`mix igniter.install phoenix_replay`)
+- [x] [ADR-0007 Phase 1](docs/decisions/0007-liveview-snapshot-stream.md) — LiveView snapshot stream foundation: `PhoenixReplay.CaptureStream` public API, `LiveView.Snapshots` `on_mount` capture (`attach_hook` per stage), PII-safe shape extractor, `Plug.SessionLink` cookie bridge, server-side clock offset, ingest merge into the `phoenix_replay_events` table
+- [ ] [ADR-0008](docs/decisions/0008-defer-admin-replay-viewer-ui.md) — Admin replay viewer UI for LV snapshots **deferred**. Capture data accessible via direct queries / [`ash_feedback`](https://github.com/jhlee111/ash_feedback) admin; viewer UI revisited only on concrete demand signal
+- [ ] ADR-0007 Phase 2 / 3 — value allowlist macro, custom shape extractors, telemetry events, Benchee performance suite
 - [ ] Phase 6 — Hex publish (PoC hardening first)
 
 ## Panel addons

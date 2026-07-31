@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0008 — admin replay viewer UI deferred (2026-04-28)
+
+Phase 2 of the LiveView snapshot stream (the `admin-sidebar-tab` panel
+addon slot, the client-side LV state addon, click-to-seek wiring, and
+a `PhoenixReplay.seekTo/3` JS API) is deferred indefinitely. A
+research pass over Sentry, PostHog, and Highlight.io found no OSS RUM
+tool that satisfies the project's combined requirements, so the
+project stands — but the viewer UI is its most substitutable piece,
+and the human-viewer hypothesis is unproven against querying the data
+directly from Postgres via Ash.
+
+- New [ADR-0008](docs/decisions/0008-defer-admin-replay-viewer-ui.md),
+  partially superseding ADR-0007's "Replay UI" sub-decision.
+- The Phase 1 design doc keeps its `Replay UI — admin sidebar
+  LiveView tab` section verbatim as the design-of-record, with a
+  status note pointing at the ADR. Restart cost stays low.
+- README roadmap marks ADR-0007 Phase 1 shipped and ADR-0008
+  deferred, and records Phase 2 / 3 capture-side work (value
+  allowlist macro, custom shape extractors, telemetry, Benchee) as
+  the still-valid backlog.
+
+No code, configuration, or downstream consumer is affected — nothing
+was implemented.
+
 ### ADR-0007 Phase 1.5 — deferred capture install (2026-04-28)
 
 Closes spec § "Open questions" item 5 (*Coordination with Path B
