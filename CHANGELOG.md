@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR-0007 Phase 1.5 — deferred capture install (2026-04-28)
+
+Closes spec § "Open questions" item 5 (*Coordination with Path B
+`:start_recording` event*). Phase 1's `on_mount` only installed
+capture hooks when the `phx_replay_session_id` cookie already
+resolved to a live `Session` at mount time. Path B — and Path A's
+first mount — create the recording session **after** the LV has
+mounted, so those LVs never attached hooks and their capture
+silently dropped on the floor.
+
+- `PhoenixReplay.LiveView.Snapshots.on_mount/4` now always primes the
+  socket (session id, throttle map, `__phx_replay_installed__` flag),
+  attaches a `:phx_replay_lifecycle` `handle_info` hook, and — when
+  connected — subscribes to `PhoenixReplay.Session.sessions_topic/0`.
+  The immediate-install happy path is unchanged when the session is
+  already alive.
+- The lifecycle hook adopts a `{:session_started, session_id,
+  identity, started_at}` broadcast and installs capture retroactively
+  when either the primed cookie id matches the broadcast or the
+  broadcast's identity correlates to the LV's actor assign
+  (`:current_user` / `:current_actor` / `:actor` / `:user`).
+  Correlation is deliberately conservative — when neither side
+  carries a comparable id it returns `false`, so unrelated tabs are
+  never cross-coupled.
+- PubSub subscribe is wrapped so test environments without PubSub
+  configured don't blow up `on_mount`.
+
+Behaviour change for hosts: none required. No config, no new host
+wiring — an LV that previously captured nothing under Path B now
+captures from the moment the session starts.
+
 ### ADR-0007 Phase 1 — LiveView snapshot stream foundation (2026-04-28)
 
 New `PhoenixReplay.CaptureStream` public API for server-origin capture

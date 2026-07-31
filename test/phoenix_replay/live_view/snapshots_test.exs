@@ -69,12 +69,21 @@ defmodule PhoenixReplay.LiveView.SnapshotsTest do
     assert {:cont, _} = Snapshots.capture_handle_event_for_test("evt", %{}, socket)
   end
 
-  test "session map without phx_replay_session_id → on_mount is a no-op" do
+  test "session map without phx_replay_session_id → on_mount defers install but stays subscribed" do
     socket = %Phoenix.LiveView.Socket{
       assigns: %{__changed__: %{}},
       view: FakeLive
     }
 
-    assert {:cont, ^socket} = Snapshots.on_mount(:install, %{}, %{}, socket)
+    assert {:cont, returned} = Snapshots.on_mount(:install, %{}, %{}, socket)
+
+    # New contract (Phase 1.5): the socket is always primed with the
+    # phx_replay assigns, the lifecycle hook is attached, and we
+    # listen for `:session_started` broadcasts. Capture stays
+    # uninstalled (`:__phx_replay_installed__` false) until a session
+    # comes online for this LV.
+    assert returned.assigns[:__phx_replay_session_id__] == nil
+    assert returned.assigns[:__phx_replay_event_throttle__] == %{}
+    assert returned.assigns[:__phx_replay_installed__] == false
   end
 end

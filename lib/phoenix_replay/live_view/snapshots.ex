@@ -42,41 +42,167 @@ defmodule PhoenixReplay.LiveView.Snapshots do
 
   @doc """
   `on_mount` callback. Reads `phx_replay_session_id` from the LV's
-  `session` map. If present, registers the LV process in
-  `PhoenixReplay.LiveView.Registry`, ensures the snapshot stream is
-  attached on the Session GenServer, and attaches capture hooks for
-  all relevant callback stages. Otherwise returns immediately.
+  `session` map and prepares the LV for snapshot capture.
+
+  Behaviour:
+
+    * **Connected LVs** subscribe to `PhoenixReplay.Session.sessions_topic/0`
+      and receive `{:session_started, session_id, identity, started_at}`
+      broadcasts when any session GenServer comes online.
+    * If the cookie's `phx_replay_session_id` already maps to a live
+      Session at mount time, capture hooks install immediately
+      (the original happy path).
+    * If the cookie is absent, stale, or points to a session that
+      is not yet alive, install is **deferred** until a
+      `:session_started` broadcast arrives. The lifecycle hook
+      (`:phx_replay_lifecycle` on `:handle_info`) adopts the
+      broadcast's session_id when actor correlation passes — see
+      `for_this_lv?/2` — and runs the install path then.
+
+  This addresses spec § "Open question 5": Path B and Path A
+  first-mount scenarios both create the recording session AFTER the
+  LV has already mounted; without the lifecycle hook the LV would
+  never attach hooks for that session and capture would silently
+  drop on the floor.
   """
   @spec on_mount(:install, map(), map(), Phoenix.LiveView.Socket.t()) ::
           {:cont, Phoenix.LiveView.Socket.t()}
   def on_mount(:install, _params, session, socket) do
-    case extract_session_id(session) do
-      nil ->
-        {:cont, socket}
+    initial_session_id = extract_session_id(session)
 
-      session_id ->
-        _ = Registry.register(session_id)
+    socket =
+      socket
+      |> assign(:__phx_replay_session_id__, initial_session_id)
+      |> assign(:__phx_replay_event_throttle__, %{})
+      |> assign(:__phx_replay_installed__, false)
+      |> safe_attach_hook(:phx_replay_lifecycle, :handle_info, &lifecycle_hook/2)
 
-        # Idempotently attach the LV snapshot stream to Session state.
-        # handle_call({:attach_stream, ...}) uses Map.put_new so a
-        # second attach is a no-op.
-        case PhoenixReplay.Session.pid_for(session_id) do
-          nil -> :ok
-          pid -> PhoenixReplay.Session.attach_stream(pid, @stream_id, [])
+    _ = maybe_subscribe_global(socket)
+
+    socket =
+      case initial_session_id && PhoenixReplay.Session.pid_for(initial_session_id) do
+        nil -> socket
+        pid when is_pid(pid) -> install_capture(socket, initial_session_id, pid)
+      end
+
+    {:cont, socket}
+  end
+
+  # Subscribe to the global sessions topic so we can pick up
+  # `:session_started` broadcasts emitted by `Session.init/1`.
+  # Idempotent — Phoenix.PubSub.subscribe/2 with the same topic from
+  # the same pid is a no-op. Wrapped in try/rescue so test
+  # environments without PubSub configured don't blow up the on_mount.
+  defp maybe_subscribe_global(socket) do
+    if Phoenix.LiveView.connected?(socket) do
+      try do
+        case PhoenixReplay.Config.pubsub() do
+          nil ->
+            :ok
+
+          pubsub ->
+            Phoenix.PubSub.subscribe(pubsub, PhoenixReplay.Session.sessions_topic())
         end
-
-        socket =
-          socket
-          |> assign(:__phx_replay_session_id__, session_id)
-          |> assign(:__phx_replay_event_throttle__, %{})
-          |> safe_attach_hook(:phx_replay_hev, :handle_event, &capture_handle_event/3)
-          |> safe_attach_hook(:phx_replay_hin, :handle_info, &capture_handle_info/2)
-          |> safe_attach_hook(:phx_replay_has, :handle_async, &capture_handle_async/3)
-          |> safe_attach_hook(:phx_replay_hpa, :handle_params, &capture_handle_params/3)
-          |> capture_baseline()
-
-        {:cont, socket}
+      rescue
+        _ -> :ok
+      end
+    else
+      :ok
     end
+  end
+
+  # Lifecycle hook — runs as the FIRST `:handle_info` hook (registered
+  # at on_mount before the capture hooks) so it always sees session
+  # broadcasts even if capture hooks aren't yet attached. Returns
+  # `{:cont, socket}` so the host LV's own `handle_info` clauses run
+  # normally.
+  defp lifecycle_hook({:session_started, sid, identity, _started_at}, socket) do
+    socket =
+      cond do
+        socket.assigns[:__phx_replay_installed__] ->
+          # Already capturing — ignore. (Could be a different session
+          # for another tab; we don't want to bounce off it.)
+          socket
+
+        socket.assigns[:__phx_replay_session_id__] == sid ->
+          # Cookie's session id matches the one that just came online.
+          # Common case: Path A continuous + cookie carried the
+          # eventual session id from the prior page.
+          adopt_and_install(socket, sid)
+
+        for_this_lv?(identity, socket) ->
+          # Cookie was nil/stale; the host's `:identify` callback
+          # returned a payload that matches our actor → adopt.
+          adopt_and_install(socket, sid)
+
+        true ->
+          socket
+      end
+
+    {:cont, socket}
+  end
+
+  defp lifecycle_hook(_message, socket), do: {:cont, socket}
+
+  # Best-effort actor correlation between the broadcast's identity
+  # payload and the LV's assigned actor. Conservative by default:
+  # when neither side carries a comparable id, return `false` so we
+  # don't cross-couple unrelated tabs.
+  defp for_this_lv?(identity, socket) when is_map(identity) do
+    bid = identity[:id] || identity["id"]
+    sid = lv_actor_id(socket)
+
+    cond do
+      is_nil(bid) -> false
+      is_nil(sid) -> false
+      true -> to_string(bid) == to_string(sid)
+    end
+  end
+
+  defp for_this_lv?(_identity, _socket), do: false
+
+  # Walk a small list of common actor assignment keys. Hosts using
+  # other names (rare) won't get retroactive adoption — they fall
+  # through to the cookie-id-matches path, which still covers the
+  # most common flow.
+  defp lv_actor_id(socket) do
+    Enum.find_value([:current_user, :current_actor, :actor, :user], fn key ->
+      case socket.assigns do
+        %{^key => %{id: id}} when not is_nil(id) -> id
+        _ -> nil
+      end
+    end)
+  end
+
+  defp adopt_and_install(socket, session_id) do
+    case PhoenixReplay.Session.pid_for(session_id) do
+      nil ->
+        # Started broadcast arrived but the GenServer is already gone
+        # (extremely tight race). Skip; another broadcast or a fresh
+        # mount will resolve it.
+        socket
+
+      pid when is_pid(pid) ->
+        install_capture(socket, session_id, pid)
+    end
+  end
+
+  defp install_capture(socket, session_id, session_pid) do
+    _ = Registry.register(session_id)
+
+    # Idempotently attach the LV snapshot stream to Session state.
+    # handle_call({:attach_stream, ...}) uses Map.put_new so a
+    # second attach is a no-op.
+    PhoenixReplay.Session.attach_stream(session_pid, @stream_id, [])
+
+    socket
+    |> assign(:__phx_replay_session_id__, session_id)
+    |> assign(:__phx_replay_installed__, true)
+    |> safe_attach_hook(:phx_replay_hev, :handle_event, &capture_handle_event/3)
+    |> safe_attach_hook(:phx_replay_hin, :handle_info, &capture_handle_info/2)
+    |> safe_attach_hook(:phx_replay_has, :handle_async, &capture_handle_async/3)
+    |> safe_attach_hook(:phx_replay_hpa, :handle_params, &capture_handle_params/3)
+    |> capture_baseline()
   end
 
   # Test-only entry point — drives capture_handle_event/3 without
