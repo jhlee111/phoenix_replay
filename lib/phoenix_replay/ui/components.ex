@@ -85,6 +85,18 @@ defmodule PhoenixReplay.UI.Components do
         "receiver makes. Set `true` for QA-internal portals where the " <>
         "reporter is also the triager."
 
+  attr :record_cross_origin_iframes, :boolean,
+    default: false,
+    doc:
+      "When `true`, passes rrweb's `recordCrossOriginIframes` so this " <>
+        "recorder merges events posted by same-library recorders running " <>
+        "in cross-origin iframes, and — if this page is itself framed — " <>
+        "posts its own events to the parent instead of emitting locally. " <>
+        "Both sides must set it. Leave `false` (default) unless you own " <>
+        "every framed origin: rrweb relays across frames over an " <>
+        "unencrypted `postMessage`, so any page that frames yours could " <>
+        "read the recording."
+
   attr :allow_paths, :list,
     default: [:report_now, :record_and_report],
     doc:
@@ -214,6 +226,7 @@ defmodule PhoenixReplay.UI.Components do
       data-position={@position}
       data-mode={@mode}
       data-show-severity={to_string(@show_severity)}
+      data-record-cross-origin-iframes={to_string(@record_cross_origin_iframes)}
       data-allow-paths={Enum.map_join(@allow_paths, ",", &Atom.to_string/1)}
       data-buffer-window-seconds={@buffer_window_seconds}
       data-audio-default={@audio_default}

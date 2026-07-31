@@ -32,6 +32,14 @@
     position: "bottom_right",
     showSeverity: false,
     allowPaths: ["report_now", "record_and_report"],
+    // Opt-in rrweb cross-origin iframe recording. When true, a page
+    // recording itself inside an iframe posts its events to the parent
+    // recorder instead of emitting locally, and a parent recorder
+    // merges children's events into its own stream. Both sides must
+    // set it. Defaults false: rrweb relays over an unencrypted
+    // postMessage, so whoever frames the page could read the recording
+    // — that has to stay a deliberate host decision.
+    recordCrossOriginIframes: false,
     severities: ["info", "low", "medium", "high", "critical"],
     defaultSeverity: "medium",
   };
@@ -223,7 +231,11 @@
   // the object returned by `createClient` below — it handles session
   // handshake, state flagging, and the flush timer. This helper just
   // wires rrweb into the provided buffer.
-  function createRecorder({ buffer }) {
+  // `recordCrossOriginIframes` is passed as a named option rather than
+  // a blanket `recordOptions` passthrough on purpose: a generic merge
+  // would let a host override `emit` or `plugins` and silently break
+  // the ring buffer and the console/network plugins set up below.
+  function createRecorder({ buffer, recordCrossOriginIframes }) {
     if (!global.rrweb || !global.rrweb.record) {
       console.warn("[PhoenixReplay] rrweb not loaded; recording disabled. Metadata-only reports still work.");
       return { stop: () => {}, takeFullSnapshot: () => {} };
@@ -249,6 +261,7 @@
         buffer.push(event);
       },
       plugins,
+      recordCrossOriginIframes: recordCrossOriginIframes === true,
     });
 
     return {
@@ -301,7 +314,10 @@
     // is bounded by time + count, so this is safe to leave running for
     // the lifetime of the page mount. `:passive` means the buffer is
     // never drained to the server until the user reports.
-    recorder = createRecorder({ buffer });
+    recorder = createRecorder({
+      buffer,
+      recordCrossOriginIframes: cfg.recordCrossOriginIframes,
+    });
 
     // Idempotent: a no-op when a session token is already held.
     // On-demand mode leans on this — the session handshake waits
@@ -1873,6 +1889,8 @@
         el.dataset.phoenixReplayMounted = "1";
 
         const showSeverity = el.dataset.showSeverity === "true";
+        const recordCrossOriginIframes =
+          el.dataset.recordCrossOriginIframes === "true";
 
         // Parse allow_paths CSV. Defensive: filter to known path values
         // and warn on unknown atoms. A typo in the host's allow_paths
@@ -1908,6 +1926,7 @@
           position: el.dataset.position,
           mode: el.dataset.mode,
           showSeverity,
+          recordCrossOriginIframes,
           allowPaths: effectiveAllowPaths,
           bufferWindowMs,
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));

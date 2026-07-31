@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — opt-in cross-origin iframe recording (2026-07-31)
+
+Fixes [#1](https://github.com/jhlee111/phoenix_replay/issues/1). The
+recorder built rrweb's option object literally and `createClient`
+handed it only the ring buffer, so no host-supplied rrweb option could
+reach `record()` — a host framing content from another origin recorded
+a blank rectangle where that content was.
+
+- New `recordCrossOriginIframes` option on `PhoenixReplay.init/1`
+  (default `false`), plumbed through `createClient` → `createRecorder`
+  → `rrweb.record()`.
+- `autoMount` reads it from `data-record-cross-origin-iframes="true"`.
+- New `:record_cross_origin_iframes` attr on
+  `PhoenixReplay.UI.Components.phoenix_replay_widget/1` renders that
+  data attribute.
+
+Exposed as a **named** option rather than a generic `recordOptions`
+passthrough: a blanket merge would let a host override `emit` or
+`plugins` and silently break the ring buffer and the console/network
+plugins the library installs deliberately.
+
+Defaults to `false` because rrweb relays events across frames over an
+unencrypted `postMessage` — a framed page that records itself can be
+read by whoever frames it, so enabling it stays a deliberate host
+decision.
+
 ### ADR-0008 — admin replay viewer UI deferred (2026-04-28)
 
 Phase 2 of the LiveView snapshot stream (the `admin-sidebar-tab` panel
