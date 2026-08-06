@@ -105,6 +105,27 @@ defmodule PhoenixReplay.UI.ComponentsTest do
       assert html =~ ~s(data-widget-text="Report issue")
     end
 
+    test "record_cross_origin_iframes defaults to false" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/api/feedback",
+          csrf_token: "x"
+        )
+
+      assert html =~ ~s(data-record-cross-origin-iframes="false")
+    end
+
+    test "record_cross_origin_iframes reaches the mount div when opted in" do
+      html =
+        render_component(&phoenix_replay_widget/1,
+          base_path: "/api/feedback",
+          csrf_token: "x",
+          record_cross_origin_iframes: true
+        )
+
+      assert html =~ ~s(data-record-cross-origin-iframes="true")
+    end
+
     test "includes the stylesheet and client JS" do
       html =
         render_component(&phoenix_replay_widget/1,

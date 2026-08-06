@@ -27,6 +27,14 @@
     csrfHeader: "x-csrf-token",
     // Widget UX.
     widgetText: "Report issue",
+    // Opt-in rrweb cross-origin iframe recording. When true, a page
+    // recording itself inside an iframe posts its events to the parent
+    // recorder instead of emitting locally, and a parent recorder
+    // merges children's events into its own stream. Both sides must
+    // set it. Defaults false: rrweb relays over an unencrypted
+    // postMessage, so whoever frames the page could read the recording
+    // — that has to stay a deliberate host decision.
+    recordCrossOriginIframes: false,
     severities: ["info", "low", "medium", "high", "critical"],
     defaultSeverity: "medium",
   };
@@ -87,7 +95,11 @@
 
   // ---- recorder lifecycle ------------------------------------------------
 
-  function startRecording({ buffer }) {
+  // `recordCrossOriginIframes` is passed as a named option rather than
+  // a blanket `recordOptions` passthrough on purpose: a generic merge
+  // would let a host override `emit` or `plugins` and silently break
+  // the ring buffer and the console/network plugins set up below.
+  function startRecording({ buffer, recordCrossOriginIframes }) {
     if (!global.rrweb || !global.rrweb.record) {
       console.warn("[PhoenixReplay] rrweb not loaded; recording disabled. Metadata-only reports still work.");
       return { stop: () => {} };
@@ -113,6 +125,7 @@
         buffer.push(event);
       },
       plugins,
+      recordCrossOriginIframes: recordCrossOriginIframes === true,
     });
 
     return { stop: typeof stop === "function" ? stop : () => {} };
@@ -186,7 +199,10 @@
 
     async function start() {
       await startSession();
-      recorder = startRecording({ buffer });
+      recorder = startRecording({
+        buffer,
+        recordCrossOriginIframes: cfg.recordCrossOriginIframes,
+      });
       scheduleFlush();
     }
 
@@ -209,7 +225,10 @@
 
       // Start a fresh session so the next report doesn't share buffer/seq.
       recorder?.stop?.();
-      recorder = startRecording({ buffer });
+      recorder = startRecording({
+        buffer,
+        recordCrossOriginIframes: cfg.recordCrossOriginIframes,
+      });
       await startSession().catch(() => {});
     }
 
@@ -312,6 +331,8 @@
           basePath: el.dataset.basePath,
           csrfToken: el.dataset.csrfToken,
           widgetText: el.dataset.widgetText,
+          recordCrossOriginIframes:
+            el.dataset.recordCrossOriginIframes === "true",
         }).catch((err) => console.warn("[PhoenixReplay] auto-mount failed:", err));
       });
     },

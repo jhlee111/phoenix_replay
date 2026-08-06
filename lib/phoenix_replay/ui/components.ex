@@ -58,6 +58,18 @@ defmodule PhoenixReplay.UI.Components do
     default: "Report issue",
     doc: "Label shown on the floating toggle button."
 
+  attr :record_cross_origin_iframes, :boolean,
+    default: false,
+    doc:
+      "When `true`, passes rrweb's `recordCrossOriginIframes` so this " <>
+        "recorder merges events posted by same-library recorders running " <>
+        "in cross-origin iframes, and — if this page is itself framed — " <>
+        "posts its own events to the parent instead of emitting locally. " <>
+        "Both sides must set it. Leave `false` (default) unless you own " <>
+        "every framed origin: rrweb relays across frames over an " <>
+        "unencrypted `postMessage`, so any page that frames yours could " <>
+        "read the recording."
+
   attr :rrweb_src, :string,
     default: @default_rrweb_src,
     doc: "Script URL for rrweb core. Pass `nil` to disable rrweb entirely."
@@ -97,6 +109,7 @@ defmodule PhoenixReplay.UI.Components do
       data-base-path={@base_path}
       data-csrf-token={@csrf_token}
       data-widget-text={@widget_text}
+      data-record-cross-origin-iframes={to_string(@record_cross_origin_iframes)}
       {@rest}
     />
     """
